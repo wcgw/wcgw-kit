@@ -10,6 +10,15 @@ use super::window::Window;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WindowId(u64);
 
+/// How wide a sidebar is, in cells: as neo-tree's in the author's Neovim, in every app.
+pub const SIDEBAR_WIDTH: u16 = 35;
+
+/// How wide a sidebar is on a screen `columns` wide: [`SIDEBAR_WIDTH`], or half the screen when it's narrower.
+#[must_use]
+pub fn sidebar_width(columns: u16) -> u16 {
+    SIDEBAR_WIDTH.min(columns / 2)
+}
+
 /// How much room a window takes in its split, across for side-by-side windows and down for stacked ones.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Size {

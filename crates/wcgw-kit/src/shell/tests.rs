@@ -1167,6 +1167,13 @@ fn a_click_up_a_buffer_that_follows_its_end_stays_where_it_lands() {
 }
 
 #[test]
+fn a_sidebar_is_35_cells_wide_as_neo_tree_s_or_half_a_narrow_screen() {
+    assert_eq!(super::sidebar_width(200), super::SIDEBAR_WIDTH);
+    assert_eq!(super::SIDEBAR_WIDTH, 35);
+    assert_eq!(super::sidebar_width(60), 30);
+}
+
+#[test]
 fn a_sidebar_split_in_rows_keeps_its_width_and_its_windows_their_rows() {
     let mut toy = toy(60, 12);
     let side = toy.kit.add_buffer("side", page("side"), false);

@@ -48,7 +48,7 @@ pub use statusline::{Segment, Side};
 pub use wcgw_kit_gfx::Graphics;
 use window::{Viewport, Window};
 use windows::{Axis, Toward, Windows};
-pub use windows::{Placement, Size, WindowId};
+pub use windows::{Placement, SIDEBAR_WIDTH, Size, WindowId, sidebar_width};
 
 /// A cell's size in pixels until the terminal says otherwise: Ghostty's, as measured in devnull's M0.1.
 const DEFAULT_CELL_SIZE: (u16, u16) = (10, 20);
