@@ -142,8 +142,9 @@ to night) and leave the background to the terminal.
 - **Winbar** per window: titles and breadcrumbs, supplied by the buffer (slackers' breadcrumbs, muttrs'
   `account › mailbox`, ghd's Preview title).
 - **One global statusline** (`laststatus=3`) of segments, each with an alignment and a priority; the lowest go first
-  when narrow. Kit segments: mode, showcmd, search count `[3/7]`, Top/Bot/%, a spinner with "N more". App segments:
-  unread counts, connection state, voight.
+  when narrow. Kit segments: mode, search count `[3/7]`, Top/Bot/%, the ruler `6:4`, a spinner with "N more". App
+  segments: unread counts, connection state, voight. As lualine draws it in the author's Neovim: the mode and the
+  ruler in the mode's colours, rounded with a Nerd Font. Pending keys show only with `:set showcmd` (off, as there).
 - **Cmdline row** (`cmdheight=1`; `cmdheight=0` merges it into the statusline). Messages as Neovim's: they stay until
   replaced, errors in `ErrorMsg`, history in `:messages`. No toasts that expire.
 - **No permanent key hints**: which-key after a prefix, and `:help`.
@@ -185,7 +186,10 @@ Shared verbs (a convention in the docs, not enforced): apps use these keys where
 | `r` / `R` | Reply / quote |
 | `s` | Star, flag |
 | `x` / `A` | Select and move down / all shown, or none (`:toggle`, `:toggle!`) |
-| `<Esc>` | Clear the selection, else the filter or limit (`:clear`) |
+| `<Esc>` | Hide the search's matches (`:nohlsearch`, the kit's); in ghd and muttrs, then the selection, then the filter (`:clear`) |
+| `]b` / `[b` | Next and previous buffer, as `gt` / `gT` (the kit's) |
+| `<leader>f…` | Find, as fzf-lua's: `ff` the app's own (people, Notifications by filter, a Mailbox, a Conversation), `fb` buffers, `fh` help, `fk` keys, `fC` commands, `fj` jumps (the kit's) |
+| `]h` / `[h` | Next and previous hunk, as gitsigns' (ghd's diffs) |
 | `a` | Out of the inbox: archive (muttrs), Done (ghd) |
 | `dd` | Delete |
 | `\` | The sidebar: go to it, hide it from within, bring it back (`:sidebar`) |
@@ -452,6 +456,15 @@ Calls made while building, and why; each can be revisited.
   kit a3f1955, ad39f88; devnull c61dbbc, f76ca47; ghd df18dda, c981398, b80f0c6 (with a clippy slip, 07e0fe2);
   muttrs 0d35d77, e4e9fe4, aee8819, 64f3254, 95590fd, d46290f, 3c6d76a; slackers 1afe686 (a doc comment misplaced
   in a51d19c), 953e5fe, f4bd41f.
+- **The author's Neovim, as defaults** (a third pass, from `~/.config/nvim`): `<Esc>` hides the search's matches,
+  `]b`/`[b` go through buffers, `<leader>f` finds (fzf-lua's maps), the statusline is lualine's, floats leave the
+  background to the terminal (tokyonight's transparent floats), `noshowcmd`, `showtabline=2` (bufferline's),
+  sidebars 35 cells (neo-tree's), prose up to `textwidth=120`, and ghd's diffs go by hunk (gitsigns' `]h`). The calls:
+  ghd's filter is its `<leader>ff`, muttrs' forward moved to `<leader>F` and moving to `:pick move`, muttrs'
+  `pager_width` is read no more for `textwidth`, devnull's `<leader>/` is `<leader>ff`. Commits: the kit 37fde61,
+  2d055ee, 5eca281, 37c0090, 34ead85, e3b32a5, e090fee, 952b14d, e08f989, c9f11c6; devnull 9e6716f, 8d1707a,
+  1d23220, 944f45b; ghd ec48f97, e76ce00, 2769fdb, 5c0506f; muttrs 8a4d0bf, f734ab3, 2544856, 16b26dc, 6c8980e;
+  slackers 79b2705, 1ee0537, d6fa271, b0de83a, 39370e4.
 - **Still open, from the ports**: a span carries one highlight group, so ghd lays its read/unread/selected styles
   over a View's when drawing it, and `:hi` on those shows at the next redraw; a buffer shown in two windows of
   different widths is laid out (by the application) for one of them.
