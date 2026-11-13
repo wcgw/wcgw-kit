@@ -419,8 +419,12 @@ Calls made while building, and why; each can be revisited.
   it needs them.
 - **Command names are letters only** (`ex.rs` splits the name at the first non-letter), as Vim's: muttrs renamed
   `:not-junk` to `:notjunk` and `:delete-mailbox` to `:delmailbox` (its ADR 0007).
-- **Picker verbs** act on the choice under the cursor and leave the picker open (`<C-d>` deletes a draft, say); the
-  border's bottom says them. A pick still closes it.
+- **Picker verbs** act on the choice under the cursor and leave the picker open, for the verb to change its
+  choices (`Picker::set_choices`, after deleting a draft, say) or close it (`Kit::close_picker`, to open what was
+  chosen in a split, say); the border's bottom says them. A pick still closes it. (Until 1505ad6+1 a verb closed
+  the picker, against what this note said; slackers found it.)
+- **Any quit frees the pictures**: `Kit::update` puts the escapes deleting what the terminal holds before an
+  `Effect::Quit`, the application's own (after `Quitting::Later`) as the kit's.
 - **The composer's hooks**: `on_key` sees a key before the text area does and may take it, `on_word` hears the word
   before the cursor as it changes, `on_leave` hears insert mode end (to keep a draft, say).
 - **The composer's completion** gives the application the word before the cursor; the application decides what it

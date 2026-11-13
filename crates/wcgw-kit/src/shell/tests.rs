@@ -19,6 +19,8 @@ enum Thing {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ToyMsg {
     Found(String, Vec<String>),
+    /// What the toy was busy with is done: it quits.
+    Done,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,6 +65,7 @@ impl App for Toy {
                 }
                 Vec::new()
             }
+            ToyMsg::Done => vec![Effect::Quit],
         }
     }
 
@@ -1077,6 +1080,47 @@ fn quitting_waits_for_an_application_that_asks_but_not_with_a_bang() {
 }
 
 #[test]
+fn quitting_frees_the_pictures_however_it_comes() {
+    for busy in [false, true] {
+        let mut toy = toy(40, 8);
+        let _ = toy.kit.set_graphics(Graphics::Kitty);
+        pictured(&mut toy, "one.png", 4, 2);
+        let id = toy
+            .press("j")
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Picture { kitty, .. } => *kitty,
+                _ => None,
+            })
+            .expect("asked for");
+        let _ = toy.update(Msg::Picture {
+            source: "one.png".into(),
+            cols: 4,
+            rows: 2,
+            result: Ok(Prepared::Kitty {
+                escapes: "<sent>".into(),
+                staged: None,
+                bytes: 64,
+            }),
+        });
+        toy.app.busy = busy;
+
+        let mut effects = toy.press(":qa<CR>");
+        if busy {
+            effects.extend(toy.send(ToyMsg::Done));
+        }
+
+        let deleted = Effect::Graphics(wcgw_kit_gfx::kitty_delete(id));
+        assert_eq!(
+            effects.iter().filter(|effect| **effect == deleted).count(),
+            1,
+            "busy {busy}: {effects:?}"
+        );
+        assert_eq!(effects.last(), Some(&Effect::Quit));
+    }
+}
+
+#[test]
 fn pictures_in_view_are_asked_for_from_the_start_and_graphics_says_how() {
     let mut toy = toy(40, 8);
     let _ = toy.kit.set_graphics(Graphics::HalfBlocks);
@@ -1124,10 +1168,31 @@ fn a_picker_s_verbs_act_on_the_choice_and_its_border_says_them() {
                 pick: Pick::Target(Thing::Link(kit.buffer(id).name().to_owned())),
             })
             .collect();
-        Picker::list("Pages", choices, "none").verb("<C-y>", "copy", |_, _, pick| match pick {
-            Pick::Target(Thing::Link(name)) => vec![Effect::Copy(name)],
-            _ => Vec::new(),
-        })
+        Picker::list("Pages", choices, "none")
+            .verb("<C-y>", "copy", |_, _, pick| match pick {
+                Pick::Target(Thing::Link(name)) => vec![Effect::Copy(name)],
+                _ => Vec::new(),
+            })
+            .verb("<C-d>", "drop", |_, kit, pick| {
+                let Some(picker) = kit.picker_mut() else {
+                    return Vec::new();
+                };
+                let kept = ["page/home", "page/x"]
+                    .into_iter()
+                    .map(|name| Choice {
+                        label: vec![(name.to_owned(), Group::NORMAL_FLOAT)],
+                        text: name.to_owned(),
+                        pick: Pick::Target(Thing::Link(name.to_owned())),
+                    })
+                    .filter(|choice| choice.pick != pick)
+                    .collect();
+                picker.set_choices(kept);
+                Vec::new()
+            })
+            .verb("<C-o>", "open", |_, kit, _| {
+                kit.close_picker();
+                Vec::new()
+            })
     });
 
     let _ = toy.press(":pick pages<CR>");
@@ -1151,10 +1216,20 @@ fn a_picker_s_verbs_act_on_the_choice_and_its_border_says_them() {
     );
 
     assert_eq!(toy.press("<C-y>"), [Effect::Copy("page/x".into())]);
+    let open = |toy: &Harness<Toy>| toy.screen().rows.iter().any(|row| row.contains("Pages"));
+    assert!(open(&toy), "a verb leaves the picker open");
+    let _ = toy.press("<C-d>");
     assert!(
-        !toy.screen().rows.iter().any(|row| row.contains("Pages")),
-        "closed"
+        !toy.screen()
+            .rows
+            .iter()
+            .any(|row| row.contains("│  page/x")),
+        "it changed the choices: {:?}",
+        toy.screen().rows
     );
+    assert_eq!(toy.press("<C-y>"), [Effect::Copy("page/home".into())]);
+    let _ = toy.press("<C-o>");
+    assert!(!open(&toy), "unless it closes it");
 }
 
 #[test]

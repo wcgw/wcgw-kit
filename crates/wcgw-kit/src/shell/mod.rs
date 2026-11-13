@@ -851,7 +851,11 @@ impl<A: App> Kit<A> {
                 self.cursor_to_end(id);
             }
         }
-        if !effects.contains(&Effect::Quit) {
+        if let Some(at) = effects.iter().position(|effect| *effect == Effect::Quit) {
+            // Whoever quits, the kit's or the application's way, the pictures sent to the terminal go first.
+            let freed = self.pictures.clear();
+            effects.splice(at..at, freed);
+        } else {
             effects.extend(self.notify_shown(app));
             effects.extend(self.pictures_in_view());
         }
@@ -1520,9 +1524,7 @@ impl<A: App> Kit<A> {
                     // The application quits once it is ready, with Effect::Quit; `:qa!` doesn't wait.
                     return Ok(Vec::new());
                 }
-                let mut effects = self.pictures.clear();
-                effects.push(Effect::Quit);
-                return Ok(effects);
+                return Ok(vec![Effect::Quit]);
             }
             Builtin::Split(vertical) => {
                 self.windows

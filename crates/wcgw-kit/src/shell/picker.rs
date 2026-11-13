@@ -206,8 +206,9 @@ impl<A: App> Picker<A> {
         }
     }
 
-    /// Makes `key` (Vim notation, such as `<C-y>`) do `run` with the chosen choice, closing the picker, as `<CR>`
-    /// opens it; its border says `key` and `description`.
+    /// Makes `key` (Vim notation, such as `<C-y>`) do `run` with the chosen choice; its border says `key` and
+    /// `description`. The picker stays open, for `run` to change its choices ([`Kit::picker_mut`]) or close it
+    /// ([`Kit::close_picker`]) when it opens what was chosen.
     #[must_use]
     pub fn verb(
         mut self,
@@ -263,6 +264,19 @@ impl<A: App> Picker<A> {
         self.selected = 0;
         self.hint = hint.into();
         true
+    }
+
+    /// Puts `choices` in place of a list's, narrowed by the query typed, the same place in the list chosen as
+    /// near as there is one: after a verb took one away, say. A search's take what it found through
+    /// [`Picker::found`]; this does nothing to them.
+    pub fn set_choices(&mut self, choices: Vec<Choice<A::Target>>) {
+        if self.is_searching() {
+            return;
+        }
+        let selected = self.selected;
+        self.choices = choices;
+        self.narrow();
+        self.selected = selected.min(self.shown.len().saturating_sub(1));
     }
 
     /// Whether its choices come from a search.
@@ -480,7 +494,6 @@ impl<A: App> Kit<A> {
             }
             Outcome::Verb(at, pick) => {
                 let run = Rc::clone(&picker.verbs[at].2);
-                self.mode = Mode_::Normal;
                 run(app, self, pick)
             }
             Outcome::Picked(pick) => {
