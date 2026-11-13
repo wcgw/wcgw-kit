@@ -8,6 +8,8 @@ use std::fmt;
 use std::rc::Rc;
 use std::time::Duration;
 
+use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
+use nucleo_matcher::{Config, Matcher, Utf32Str};
 use ratatui::Frame;
 use ratatui::layout::{Position, Rect};
 use ratatui::text::{Line as TextLine, Span as TextSpan};
@@ -109,60 +111,45 @@ enum Outcome<T> {
     Leave,
 }
 
-/// How well `query` matches `text`, as fzf does it, and which characters of `text` matched, by index: its characters in order, ignoring case unless the query has
-/// capitals. Matches at the start of words and runs of consecutive characters score higher, gaps lower. `None` when
-/// `text` does not hold the query's characters in order.
-fn best(query: &str, text: &str) -> Option<(i64, Vec<usize>)> {
-    let smart = query.chars().any(char::is_uppercase);
-    let fold = |c: char| {
-        if smart {
-            c
-        } else {
-            c.to_lowercase().next().unwrap_or(c)
+/// Ranks texts against a query as fzf does (D14): every space-separated term must match, fuzzily unless it starts
+/// with `'` (exact) or `^` (prefix); lower case matches either case. Keeps nucleo's scratch space between texts.
+struct Ranker {
+    pattern: Pattern,
+    matcher: Matcher,
+    buffer: Vec<char>,
+}
+
+impl Ranker {
+    fn new(query: &str) -> Self {
+        Self {
+            pattern: Pattern::parse(query, CaseMatching::Smart, Normalization::Smart),
+            matcher: Matcher::new(Config::DEFAULT),
+            buffer: Vec::new(),
         }
-    };
-    let query: Vec<char> = query
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .map(fold)
-        .collect();
-    let text: Vec<char> = text.chars().map(fold).collect();
-    let Some(&first) = query.first() else {
-        return Some((0, Vec::new()));
-    };
-    let word_start = |i: usize| i == 0 || matches!(text[i - 1], '/' | '@' | '-' | '_' | '.' | ' ');
-    // Each place the first character matches starts a greedy run; the best run counts.
-    (0..text.len())
-        .filter(|&i| text[i] == first)
-        .filter_map(|start| {
-            let mut total = 0;
-            let mut at = start;
-            let mut previous: Option<usize> = None;
-            let mut positions = Vec::with_capacity(query.len());
-            for &wanted in &query {
-                let found = (at..text.len()).find(|&i| text[i] == wanted)?;
-                total += 16;
-                if word_start(found) {
-                    total += 8;
-                }
-                match previous {
-                    Some(previous) if found == previous + 1 => total += 8,
-                    Some(previous) => {
-                        total -= i64::try_from(found - previous - 1).unwrap_or(i64::MAX);
-                    }
-                    None => total -= i64::try_from(found).unwrap_or(i64::MAX) / 4,
-                }
-                previous = Some(found);
-                positions.push(found);
-                at = found + 1;
-            }
-            Some((total, positions))
-        })
-        // The first of the best, as `max` would pick the last.
-        .fold(None, |best: Option<(i64, Vec<usize>)>, run| match best {
-            Some(best) if best.0 >= run.0 => Some(best),
-            _ => Some(run),
-        })
+    }
+
+    /// How well the query matches `text`, and which characters of it matched, by index; `None` when it doesn't.
+    fn rank(&mut self, text: &str) -> Option<(i64, Vec<usize>)> {
+        let mut indices = Vec::new();
+        let haystack = Utf32Str::new(text, &mut self.buffer);
+        let score = self
+            .pattern
+            .indices(haystack, &mut self.matcher, &mut indices)?;
+        // Several terms can match the same character; positions come back in no particular order.
+        indices.sort_unstable();
+        indices.dedup();
+        let positions = indices
+            .into_iter()
+            .map(|i| usize::try_from(i).unwrap_or(usize::MAX))
+            .collect();
+        Some((i64::from(score), positions))
+    }
+}
+
+/// How well `query` matches `text`, as fzf does it, and which characters of `text` matched, by index.
+#[cfg(test)]
+fn best(query: &str, text: &str) -> Option<(i64, Vec<usize>)> {
+    Ranker::new(query).rank(text)
 }
 
 impl<A: App> Picker<A> {
@@ -269,13 +256,15 @@ impl<A: App> Picker<A> {
         if self.is_searching() {
             return;
         }
-        let query = self.query.text();
+        let mut ranker = Ranker::new(&self.query.text());
         let mut scored: Vec<(usize, i64, Vec<usize>)> = self
             .choices
             .iter()
             .enumerate()
             .filter_map(|(i, choice)| {
-                best(&query, &choice.text).map(|(score, matched)| (i, score, matched))
+                ranker
+                    .rank(&choice.text)
+                    .map(|(score, matched)| (i, score, matched))
             })
             .collect();
         scored.sort_by_key(|&(_, score, _)| std::cmp::Reverse(score));

@@ -64,3 +64,13 @@ fn a_match_says_which_characters_matched() {
         "of equal places, the first"
     );
 }
+
+#[test]
+fn queries_take_fzf_s_syntax() {
+    assert!(score("^log", "log/following").is_some(), "a prefix");
+    assert_eq!(score("^foll", "log/following"), None);
+    assert!(score("'foll", "log/following").is_some(), "exact");
+    assert_eq!(score("'flw", "log/following"), None);
+    assert!(score("log foll", "log/following").is_some(), "every term");
+    assert_eq!(score("log trend", "log/following"), None);
+}
