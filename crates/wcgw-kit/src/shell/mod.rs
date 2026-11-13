@@ -131,11 +131,11 @@ impl<T> Buffer<T> {
         });
     }
 
-    /// The winbar laid out for `width` cells: its first row is what shows.
-    fn winbar_layout(&self, width: u16) -> Option<crate::doc::Layout<'_, T>> {
+    /// The winbar laid out as one row, unwrapped: what the window's width doesn't hold is cut, not wrapped.
+    fn winbar_layout(&self) -> Option<crate::doc::Layout<'_, T>> {
         self.winbar
             .as_ref()
-            .map(|line| crate::doc::Layout::new(line, width))
+            .map(|line| crate::doc::Layout::new(line, u16::MAX))
     }
 
     /// Makes windows showing it highlight where their cursor is, as `cursorline` says.

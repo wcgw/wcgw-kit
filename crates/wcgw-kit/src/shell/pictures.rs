@@ -378,7 +378,7 @@ impl<A: App> Kit<A> {
             let top = window.top(&layout, viewport);
             let bottom = (top + usize::from(area.height)).min(layout.row_count());
             add_pictures(&layout, top..bottom, &mut wanted);
-            if let Some(winbar) = self.buffers[window.buffer.0].winbar_layout(rect.width) {
+            if let Some(winbar) = self.buffers[window.buffer.0].winbar_layout() {
                 add_pictures(&winbar, 0..winbar.row_count().min(1), &mut wanted);
             }
         }

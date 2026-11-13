@@ -179,7 +179,7 @@ impl<A: App> Kit<A> {
     ) -> Position {
         let windows_area = self.windows_area();
         let area = self.text_area(rect, windows_area, window.buffer);
-        if let Some(winbar) = self.buffers[window.buffer.0].winbar_layout(rect.width) {
+        if let Some(winbar) = self.buffers[window.buffer.0].winbar_layout() {
             let group = if is_current {
                 Group::WIN_BAR
             } else {

@@ -726,6 +726,16 @@ fn a_winbar_takes_the_first_row_of_the_windows_showing_its_buffer() {
     assert_eq!(screen.rows[0], " Home", "{:#?}", screen.rows);
     assert_eq!(screen.rows[1], "page/home");
     assert_eq!(screen.cursor, (0, 1));
+
+    toy.kit.buffer_mut(id).set_winbar(Some(vec![(
+        " Home · limited to from:ann and more besides".to_owned(),
+        Group::TITLE,
+    )]));
+    assert_eq!(
+        toy.screen().rows[0],
+        " Home · limited to from:ann and more bes",
+        "cut at the edge, not wrapped at a word"
+    );
 }
 
 #[test]
