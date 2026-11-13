@@ -729,6 +729,46 @@ fn a_winbar_takes_the_first_row_of_the_windows_showing_its_buffer() {
 }
 
 #[test]
+fn a_winbar_may_hold_a_picture_asked_for_and_drawn_as_the_text_s() {
+    let mut toy = toy(40, 8);
+    let _ = toy.kit.set_graphics(Graphics::Kitty);
+    let id = toy.kit.current_buffer();
+
+    toy.kit.buffer_mut(id).set_winbar_spans(Some(vec![
+        Span::picture("avatar.png", 2),
+        Span::new(" Ada", Group::TITLE),
+    ]));
+    let effects = toy.press("j");
+
+    let asked = effects.iter().find_map(|effect| match effect {
+        Effect::Picture {
+            source,
+            cols,
+            rows,
+            kitty,
+        } => Some((source.clone(), *cols, *rows, *kitty)),
+        _ => None,
+    });
+    let Some((source, 2, 1, Some(_))) = asked else {
+        panic!("{effects:?}");
+    };
+    assert_eq!(source, "avatar.png");
+    let _ = toy.update(Msg::Picture {
+        source,
+        cols: 2,
+        rows: 1,
+        result: Ok(Prepared::Kitty {
+            escapes: "<sent>".into(),
+            staged: None,
+            bytes: 64,
+        }),
+    });
+    let winbar = &toy.screen().rows[0];
+    assert!(winbar.contains('\u{10EEEE}'), "placeholders: {winbar:?}");
+    assert!(winbar.ends_with(" Ada"), "{winbar:?}");
+}
+
+#[test]
 fn a_buffer_that_follows_its_end_starts_there_and_stays_while_the_cursor_does() {
     let mut toy = toy(40, 8);
     let mut doc = Document::new();

@@ -179,23 +179,35 @@ impl<A: App> Kit<A> {
     ) -> Position {
         let windows_area = self.windows_area();
         let area = self.text_area(rect, windows_area, window.buffer);
-        if let Some(winbar) = &self.buffers[window.buffer.0].winbar {
+        if let Some(winbar) = self.buffers[window.buffer.0].winbar_layout(rect.width) {
             let group = if is_current {
                 Group::WIN_BAR
             } else {
                 Group::WIN_BAR_NC
             };
             let base = self.theme.style(group);
-            let spans: Vec<Span<'_>> = winbar
-                .iter()
-                .map(|(text, part)| {
-                    Span::styled(text.as_str(), base.patch(self.theme.style(*part)))
-                })
-                .collect();
-            frame.render_widget(
-                Paragraph::new(Line::from(spans)).style(base),
-                Rect::new(rect.x, rect.y, rect.width, 1.min(rect.height)),
-            );
+            let spans: Vec<Span<'_>> = if winbar.row_count() == 0 {
+                Vec::new()
+            } else {
+                winbar
+                    .styled_segments(0)
+                    .map(|(text, part, own)| {
+                        // Plain text takes the winbar's colours.
+                        let mut style = if part == Group::NORMAL {
+                            base
+                        } else {
+                            base.patch(self.theme.style(part))
+                        };
+                        if let Some(own) = own {
+                            style = style.patch(own);
+                        }
+                        Span::styled(text, style)
+                    })
+                    .collect()
+            };
+            let bar = Rect::new(rect.x, rect.y, rect.width, 1.min(rect.height));
+            frame.render_widget(Paragraph::new(Line::from(spans)).style(base), bar);
+            self.draw_pictures(frame.buffer_mut(), &winbar, 0, bar);
         }
         let viewport = Viewport {
             height: usize::from(area.height),

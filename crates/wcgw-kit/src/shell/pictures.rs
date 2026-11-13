@@ -363,7 +363,7 @@ impl<A: App> Kit<A> {
         }
     }
 
-    /// The pictures in view, each once: in any window, and on the hover card.
+    /// The pictures in view, each once: in any window and its winbar, and on the hover card.
     fn in_view(&self) -> Vec<Key> {
         let arrangement = self.windows.arrange(self.windows_area());
         let mut wanted: Vec<Key> = Vec::new();
@@ -378,6 +378,9 @@ impl<A: App> Kit<A> {
             let top = window.top(&layout, viewport);
             let bottom = (top + usize::from(area.height)).min(layout.row_count());
             add_pictures(&layout, top..bottom, &mut wanted);
+            if let Some(winbar) = self.buffers[window.buffer.0].winbar_layout(rect.width) {
+                add_pictures(&winbar, 0..winbar.row_count().min(1), &mut wanted);
+            }
         }
         if let Some(hover) = &self.hover {
             // Which pictures it has does not depend on the width it is laid out to.

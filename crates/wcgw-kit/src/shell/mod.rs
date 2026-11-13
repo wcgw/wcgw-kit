@@ -62,8 +62,8 @@ pub struct Buffer<T> {
     name: String,
     doc: Document<T>,
     listed: bool,
-    /// What the winbar of windows showing it says, if it has one (D10).
-    winbar: Option<Vec<(String, crate::hl::Group)>>,
+    /// What the winbar of windows showing it says, if it has one (D10): a line, pictures and all.
+    winbar: Option<Document<T>>,
     /// Whether windows showing it start at its end and stay there as it grows, as a chat does (D3).
     follows_end: bool,
     /// What windows showing it highlight where the cursor is.
@@ -109,7 +109,33 @@ impl<T> Buffer<T> {
 
     /// Gives windows showing it a winbar saying `title`, as text in highlight groups; `None` takes it away.
     pub fn set_winbar(&mut self, title: Option<Vec<(String, crate::hl::Group)>>) {
-        self.winbar = title;
+        self.set_winbar_spans(title.map(|parts| {
+            parts
+                .into_iter()
+                .map(|(text, group)| crate::doc::Span::new(text, group))
+                .collect()
+        }));
+    }
+
+    /// Gives windows showing it a winbar of `spans`: text, and pictures a row tall
+    /// ([`Span::picture`](crate::doc::Span::picture)), such as a channel's or a person's; `None` takes it away. What
+    /// doesn't fit the window's width is cut.
+    pub fn set_winbar_spans(&mut self, spans: Option<Vec<crate::doc::Span<T>>>) {
+        self.winbar = spans.map(|spans| {
+            let mut line = Document::new();
+            line.push_back(
+                "winbar",
+                crate::doc::Content::from(vec![crate::doc::Line::Text(spans)]),
+            );
+            line
+        });
+    }
+
+    /// The winbar laid out for `width` cells: its first row is what shows.
+    fn winbar_layout(&self, width: u16) -> Option<crate::doc::Layout<'_, T>> {
+        self.winbar
+            .as_ref()
+            .map(|line| crate::doc::Layout::new(line, width))
     }
 
     /// Makes windows showing it highlight where their cursor is, as `cursorline` says.

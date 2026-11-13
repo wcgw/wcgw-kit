@@ -427,6 +427,8 @@ Calls made while building, and why; each can be revisited.
   it. `j`/`k`, `<C-d>`/`<C-u>`, `gg`/`G` and the wheel go through it with a cursorline, `<CR>` opens what its row
   refers to through `App::open`, and `q`, `<Esc>`, `K` or a click leave it. It isn't a window: no search, no visual
   selection, no `<C-w>` into it.
+- **Pictures in winbars**: `Buffer::set_winbar_spans` takes the document's spans, so `Span::picture` (an
+  avatar, a channel's icon) goes in a winbar as in text; `set_winbar` stays for text in groups.
 - **Any quit frees the pictures**: `Kit::update` puts the escapes deleting what the terminal holds before an
   `Effect::Quit`, the application's own (after `Quitting::Later`) as the kit's.
 - **The composer's hooks**: `on_key` sees a key before the text area does and may take it, `on_word` hears the word
