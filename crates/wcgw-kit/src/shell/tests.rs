@@ -377,6 +377,16 @@ fn shell_and_bang_run_a_command_with_the_terminal_and_alone_ask_which() {
 }
 
 #[test]
+fn esc_hides_the_search_s_matches() {
+    let mut toy = toy(40, 8);
+
+    let _ = toy.press("/web<CR>");
+    assert!(toy.kit.nohlsearch(), "a search shows its matches");
+    let _ = toy.press("/web<CR><Esc>");
+    assert!(!toy.kit.nohlsearch(), "<Esc> hid them");
+}
+
+#[test]
 fn a_shell_command_that_fails_says_so_as_vim_does() {
     let mut toy = toy(40, 8);
 

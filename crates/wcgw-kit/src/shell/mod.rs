@@ -749,6 +749,14 @@ impl<A: App> Kit<A> {
         window.cursor.block_targets(&layout)
     }
 
+    /// Hides the last search's matches, as `:nohlsearch` (`<Esc>`) does; whether any showed. An application that
+    /// gives `<Esc>` more to clear, as a selection, clears the matches first with it.
+    pub fn nohlsearch(&mut self) -> bool {
+        let shown = self.searched().is_some();
+        self.highlighting = false;
+        shown
+    }
+
     /// What the text under the current window's cursor refers to, if anything.
     #[must_use]
     pub fn target_under_cursor(&self) -> Option<A::Target> {
