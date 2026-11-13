@@ -21,6 +21,7 @@ pub(crate) fn read(text: &str, format: TextFormat, styles: &Styles) -> Document 
         links: reader.links,
         images: Vec::new(),
         styles: styles.clone(),
+        numbered: false,
     }
 }
 

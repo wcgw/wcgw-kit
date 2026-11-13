@@ -8,7 +8,9 @@ use ratatui_core::style::{Modifier, Style};
 use wcgw_kit::doc::{Content, Document, Line, Span};
 use wcgw_kit::hl::{Group, Theme};
 
-use crate::{Rendering, Rgb, Styles};
+use crate::{Link, Rendering, Rgb, Styles};
+
+mod links;
 
 /// The styles to draw a text in with `theme`; authors' colours are judged against `page`, the background they show
 /// on, and dropped where they would not read (`None` drops them all).
@@ -45,6 +47,63 @@ pub fn document<T>(
     key: &str,
     source: impl Fn(usize) -> String,
 ) -> Document<T> {
+    let pieces: Vec<Vec<Piece>> = rendering
+        .lines
+        .iter()
+        .map(|line| {
+            line.spans
+                .iter()
+                .map(|span| Piece {
+                    content: span.content.to_string(),
+                    style: span.style,
+                    link: None,
+                })
+                .collect()
+        })
+        .collect();
+    build(rendering, &pieces, key, source, |_: usize| None)
+}
+
+/// As [`document`], with each Link's text and number (`[1]`) aimed at what `target` makes of the Link at that index of
+/// `text`'s, so that `<CR>` or a click on it opens it. `rendering` is `text`'s.
+///
+/// The rendering doesn't say which cells are a Link's; they are found by its styles: a Link's number in the style
+/// for numbers, and its text in the Link style just before. A Link's text wrapped across lines is found whole, but
+/// in a table, where the cells beside it come between, only its last line is.
+#[must_use]
+pub fn linked_document<T: Clone>(
+    text: &crate::Document,
+    rendering: &Rendering,
+    key: &str,
+    source: impl Fn(usize) -> String,
+    target: impl Fn(usize, &Link) -> Option<T>,
+) -> Document<T> {
+    let pieces = links::find(text, rendering);
+    let targets: Vec<Option<T>> = text
+        .links()
+        .iter()
+        .enumerate()
+        .map(|(index, link)| target(index, link))
+        .collect();
+    build(rendering, &pieces, key, source, |index: usize| {
+        targets.get(index).cloned().flatten()
+    })
+}
+
+/// A piece of a laid out line: its text, its style as laid out, and the index of the Link it is part of.
+struct Piece {
+    content: String,
+    style: Style,
+    link: Option<usize>,
+}
+
+fn build<T>(
+    rendering: &Rendering,
+    pieces: &[Vec<Piece>],
+    key: &str,
+    source: impl Fn(usize) -> String,
+    target: impl Fn(usize) -> Option<T>,
+) -> Document<T> {
     let mut lines: Vec<Line<T>> = Vec::with_capacity(rendering.lines.len());
     let mut skip = 0;
     for (index, line) in rendering.lines.iter().enumerate() {
@@ -61,12 +120,15 @@ pub fn document<T>(
             skip = usize::from(slot.rows.saturating_sub(1));
             continue;
         }
-        let spans = line
-            .spans
+        let spans = pieces[index]
             .iter()
-            .map(|span| {
-                Span::new(span.content.to_string(), Group::NORMAL)
-                    .with_style(line.style.patch(span.style))
+            .map(|piece| {
+                let span = Span::new(piece.content.clone(), Group::NORMAL)
+                    .with_style(line.style.patch(piece.style));
+                match piece.link.and_then(&target) {
+                    Some(target) => span.with_target(target),
+                    None => span,
+                }
             })
             .collect();
         lines.push(Line::Text(spans));

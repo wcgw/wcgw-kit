@@ -251,9 +251,41 @@ pub struct Document {
     links: Vec<Link>,
     images: Vec<Image>,
     styles: Styles,
+    /// Whether its Links are numbered after their text (`[1]`), as HTML's are; plain text's URLs are their own.
+    numbered: bool,
 }
 
 impl Document {
+    /// Colours its blocks of code with `highlight`, which hears a block's language, if it names one, and its text,
+    /// and gives the text back in pieces, each in a style laid over the code's; `None` leaves the block as it is.
+    /// The pieces are laid out as the code was, so a line too wide for the window is cut, still coloured.
+    pub fn highlight_code(
+        &mut self,
+        highlight: impl Fn(Option<&str>, &str) -> Option<Vec<(String, Style)>>,
+    ) {
+        fn walk(blocks: &mut [ir::Block], highlight: &Highlight<'_>) {
+            for block in blocks {
+                match block {
+                    ir::Block::Flow(flow) => {
+                        if let Some(code) = flow.code.clone() {
+                            highlight_flow(flow, code.language.as_deref(), highlight);
+                        }
+                    }
+                    ir::Block::Stack(inner, _) => walk(inner, highlight),
+                    ir::Block::Table(table) => {
+                        for row in &mut table.rows {
+                            for cell in &mut row.cells {
+                                walk(&mut cell.blocks, highlight);
+                            }
+                        }
+                    }
+                    ir::Block::Gap | ir::Block::Rule => {}
+                }
+            }
+        }
+        walk(&mut self.blocks, &highlight);
+    }
+
     /// Reads an HTML body, drawn in `styles`.
     #[must_use]
     pub fn html(html: &str, styles: &Styles) -> Self {
@@ -306,6 +338,33 @@ impl Document {
     #[must_use]
     pub fn render(&self, options: &Options<'_>) -> Rendering {
         layout::render(self, options)
+    }
+}
+
+/// What colours code: given its language, if named, and its text, the text in styled pieces.
+type Highlight<'a> = dyn Fn(Option<&str>, &str) -> Option<Vec<(String, Style)>> + 'a;
+
+/// `flow`'s code in the pieces `highlight` gives, each in its style laid over the code's.
+fn highlight_flow(flow: &mut ir::Flow, language: Option<&str>, highlight: &Highlight<'_>) {
+    let mut code = String::new();
+    let mut base = None;
+    for item in &flow.items {
+        match item {
+            ir::Item::Text(text, style) => {
+                base.get_or_insert(*style);
+                code.push_str(text);
+            }
+            ir::Item::Break => code.push('\n'),
+            // A picture in code is left as it is.
+            ir::Item::Image(..) => return,
+        }
+    }
+    let (Some(base), Some(pieces)) = (base, highlight(language, &code)) else {
+        return;
+    };
+    flow.items.clear();
+    for (text, style) in pieces {
+        flow.push_text(&text, base.patch(style));
     }
 }
 

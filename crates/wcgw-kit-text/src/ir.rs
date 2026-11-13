@@ -37,6 +37,15 @@ pub(crate) struct Flow {
     pub(crate) items: Vec<Item>,
     pub(crate) align: Align,
     pub(crate) white_space: WhiteSpace,
+    /// When it is a block of code (`<pre>`).
+    pub(crate) code: Option<Code>,
+}
+
+/// A block of code.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Code {
+    /// The language it names, if any.
+    pub(crate) language: Option<String>,
 }
 
 impl Flow {
@@ -45,6 +54,7 @@ impl Flow {
             items: Vec::new(),
             align,
             white_space,
+            code: None,
         }
     }
 

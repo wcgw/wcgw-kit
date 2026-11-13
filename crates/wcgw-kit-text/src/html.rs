@@ -10,7 +10,7 @@ use scraper::{ElementRef, Html, Node, Selector};
 
 use crate::color::readable;
 use crate::css::{self, Declaration, Length, Specificity};
-use crate::ir::{Align, Block, Cell, Flow, Frame, Item, Row, Table, WhiteSpace};
+use crate::ir::{Align, Block, Cell, Code, Flow, Frame, Item, Row, Table, WhiteSpace};
 use crate::{Document, Image, ImageSource, Link, Styles};
 
 pub(crate) fn read(html: &str, styles: &Styles) -> Document {
@@ -38,6 +38,7 @@ pub(crate) fn read(html: &str, styles: &Styles) -> Document {
         links: reader.links,
         images: reader.images,
         styles: styles.clone(),
+        numbered: true,
     }
 }
 
@@ -108,6 +109,18 @@ impl Reader<'_> {
                 context.white_space = WhiteSpace::Pre;
                 context.style = context.style.patch(self.styles.code);
                 self.block(element, &context, Frame::Plain, true, out);
+                if let Some(Block::Stack(blocks, _)) = out
+                    .iter_mut()
+                    .rev()
+                    .find(|block| matches!(block, Block::Stack(..)))
+                {
+                    mark_code(
+                        blocks,
+                        &Code {
+                            language: language(element),
+                        },
+                    );
+                }
             }
             "table" => self.table(element, &context, out),
             "q" => {
@@ -593,6 +606,49 @@ fn cells(row: ElementRef<'_>) -> Vec<ElementRef<'_>> {
 }
 
 /// The flow inline content goes in: the last block of `out` if it's a flow laid out as `context` says, or a new one.
+/// The language a `<pre>` names: `<pre lang="rust">` (GitHub's), a class `language-rust` or `lang-rust` on it or its
+/// `<code>` (CommonMark's), or `highlight-source-rust` on what holds it (GitHub's rendered HTML).
+fn language(pre: ElementRef<'_>) -> Option<String> {
+    fn from_classes(element: ElementRef<'_>, prefixes: &[&str]) -> Option<String> {
+        element.value().classes().find_map(|class| {
+            prefixes
+                .iter()
+                .find_map(|prefix| class.strip_prefix(prefix))
+                .filter(|lang| !lang.is_empty())
+                .map(str::to_owned)
+        })
+    }
+    const PREFIXES: &[&str] = &["language-", "lang-"];
+    if let Some(lang) = pre.attr("lang").map(str::trim).filter(|l| !l.is_empty()) {
+        return Some(lang.to_owned());
+    }
+    from_classes(pre, PREFIXES)
+        .or_else(|| {
+            pre.children()
+                .filter_map(ElementRef::wrap)
+                .find(|child| child.value().name() == "code")
+                .and_then(|code| from_classes(code, PREFIXES))
+        })
+        .or_else(|| {
+            pre.parent()
+                .and_then(ElementRef::wrap)
+                .and_then(|parent| from_classes(parent, &["highlight-source-"]))
+        })
+}
+
+/// Marks the preformatted flows among `blocks` as `code`.
+fn mark_code(blocks: &mut [Block], code: &Code) {
+    for block in blocks {
+        match block {
+            Block::Flow(flow) if flow.white_space == WhiteSpace::Pre => {
+                flow.code = Some(code.clone());
+            }
+            Block::Stack(inner, _) => mark_code(inner, code),
+            _ => {}
+        }
+    }
+}
+
 fn flow<'o>(out: &'o mut Vec<Block>, context: &Context) -> &'o mut Flow {
     let fits = matches!(out.last(), Some(Block::Flow(flow))
         if flow.align == context.align && flow.white_space == context.white_space);
