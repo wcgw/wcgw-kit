@@ -72,6 +72,18 @@ pub trait App: Sized + 'static {
         Vec::new()
     }
 
+    /// `:bdelete` (`<leader>bd`, a middle click on its tab) is taking `buffer` out of the list: let go of what the
+    /// application keeps for it, as what it follows, or say why it can't go, as for a buffer the application always
+    /// shows. Once it lets go, the kit empties `buffer` and its windows show another.
+    ///
+    /// # Errors
+    ///
+    /// Why `buffer` can't go; it stays as it is.
+    fn deleting(&mut self, kit: &mut Kit<Self>, buffer: BufferId) -> Result<Effects<Self>, String> {
+        let _ = (kit, buffer);
+        Ok(Vec::new())
+    }
+
     /// A key was handled: the cursor may be near the end of what is loaded, for instance.
     fn keyed(&mut self, kit: &mut Kit<Self>) -> Effects<Self> {
         let _ = kit;

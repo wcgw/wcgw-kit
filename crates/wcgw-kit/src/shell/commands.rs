@@ -126,6 +126,7 @@ pub(crate) enum Builtin {
     Buffer,
     Buffers,
     NextBuffer(bool),
+    Bdelete,
 }
 
 impl Builtin {
@@ -161,6 +162,12 @@ const BUILT_IN: &[(&str, usize, Builtin, &str)] = &[
         2,
         Builtin::NextBuffer(false),
         "previous buffer",
+    ),
+    (
+        "bdelete",
+        2,
+        Builtin::Bdelete,
+        "take a buffer out of the list; its windows show another",
     ),
     ("ls", 2, Builtin::Buffers, "list the buffers"),
     (

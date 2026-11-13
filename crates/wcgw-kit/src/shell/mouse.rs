@@ -1,7 +1,8 @@
 //! The mouse (D5), as Neovim has it with `'mouse'` set: the wheel scrolls the window under the pointer, a click
-//! focuses the window it lands in and puts the cursor there, a click on the tabline shows that buffer, and a click on a
-//! picker's list chooses. Clicks are keys too (`<LeftMouse>`, `<2-LeftMouse>`): a double click opens what it lands
-//! on, as `<2-LeftMouse>` is mapped to `:open` in every app, and a map can make a single click do so.
+//! focuses the window it lands in and puts the cursor there, a click on the tabline shows that buffer (a middle click
+//! deletes it, as bufferline's), and a click on a picker's list chooses. Clicks are keys too (`<LeftMouse>`,
+//! `<2-LeftMouse>`): a double click opens what it lands on, as `<2-LeftMouse>` is mapped to `:open` in every app, and
+//! a map can make a single click do so.
 
 use ratatui::layout::Rect;
 
@@ -45,9 +46,20 @@ impl<A: App> Kit<A> {
             return Vec::new();
         }
         if row < self.tabline_rows() {
-            if let Some(id) = self.tab_at(column) {
-                self.show_buffer(id);
+            let Some(id) = self.tab_at(column) else {
+                return Vec::new();
+            };
+            // A middle click closes the tab, as bufferline's does.
+            if mouse == Mouse::Middle {
+                return match self.delete_buffer(app, id) {
+                    Ok(effects) => effects,
+                    Err(error) => {
+                        self.error(error);
+                        Vec::new()
+                    }
+                };
             }
+            self.show_buffer(id);
             return Vec::new();
         }
         if mouse == Mouse::Middle || mouse == Mouse::Right {

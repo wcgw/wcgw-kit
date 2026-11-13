@@ -512,6 +512,42 @@ impl<A: App> Kit<A> {
         self.shown.push(id);
     }
 
+    /// `:bdelete` (`<leader>bd`, a middle click on its tab): takes buffer `id` out of the list once the application
+    /// lets it go ([`App::deleting`]), and empties it; the windows showing it show the buffer shown before it.
+    ///
+    /// # Errors
+    ///
+    /// Vim's E516 for a buffer that isn't listed, E90 for the last listed one, or the application's reason to keep
+    /// it.
+    pub fn delete_buffer(&mut self, app: &mut A, id: BufferId) -> Result<Effects<A>, String> {
+        if !self.buffers.get(id.0).is_some_and(|buffer| buffer.listed) {
+            return Err("E516: No buffers were deleted".to_owned());
+        }
+        let instead = self
+            .recent
+            .iter()
+            .copied()
+            .find(|&other| other != id && self.buffers[other.0].listed)
+            .or_else(|| self.listed().into_iter().find(|&other| other != id))
+            .ok_or_else(|| "E90: Cannot delete the last buffer".to_owned())?;
+        let effects = app.deleting(self, id)?;
+        for window in self.windows_showing(id) {
+            self.show_buffer_in(window, instead);
+        }
+        for window in self.windows.ids() {
+            if let Some(window) = self.windows.find_mut(window) {
+                window.forget(id);
+            }
+        }
+        self.recent.retain(|&recent| recent != id);
+        self.shown.retain(|&shown| shown != id);
+        let buffer = &mut self.buffers[id.0];
+        buffer.listed = false;
+        buffer.doc = Document::new();
+        buffer.winbar = None;
+        Ok(effects)
+    }
+
     /// Shows `id` in window `window` rather than the current one, which stays current.
     pub fn show_buffer_in(&mut self, window: WindowId, id: BufferId) {
         let current = self.windows.current_id();
@@ -1722,6 +1758,14 @@ impl<A: App> Kit<A> {
                 self.show_buffer(id);
             }
             Builtin::NextBuffer(forward) => self.cycle_buffer(forward),
+            Builtin::Bdelete => {
+                let id = if args.is_empty() {
+                    self.windows.current().buffer
+                } else {
+                    self.buffer_named(args)?
+                };
+                return self.delete_buffer(app, id);
+            }
             Builtin::Open => {
                 return self.following(app, |app, kit| match kit.target_under_cursor() {
                     Some(target) => app.open(kit, target),

@@ -42,6 +42,10 @@ struct Toy {
     open_in: Option<WindowId>,
     /// Whether `:q` waits for the toy to quit by itself.
     busy: bool,
+    /// The buffers `:bdelete` asked to let go of, by name.
+    deleted: Vec<String>,
+    /// A buffer the toy always shows, which can't go.
+    kept: Option<String>,
 }
 
 impl App for Toy {
@@ -107,6 +111,15 @@ impl App for Toy {
         let name = kit.buffer(buffer).name().to_owned();
         self.shown.push(name.clone());
         vec![Effect::App(ToyEffect::Load(name))]
+    }
+
+    fn deleting(&mut self, kit: &mut Kit<Self>, buffer: BufferId) -> Result<Effects<Self>, String> {
+        let name = kit.buffer(buffer).name().to_owned();
+        if self.kept.as_ref() == Some(&name) {
+            return Err(format!("{name} always shows"));
+        }
+        self.deleted.push(name);
+        Ok(Vec::new())
     }
 
     fn edited(&mut self, _kit: &mut Kit<Self>, saved: Result<String, String>) -> Effects<Self> {
@@ -249,6 +262,66 @@ fn the_tabline_shows_from_the_start_as_bufferline_s_does() {
         "{:#?}",
         toy.screen().rows
     );
+}
+
+/// The names of the listed buffers, as the tabline shows them.
+fn listed(toy: &Harness<Toy>) -> Vec<String> {
+    toy.kit
+        .listed()
+        .into_iter()
+        .map(|id| toy.kit.buffer(id).name().to_owned())
+        .collect()
+}
+
+#[test]
+fn bdelete_takes_a_buffer_out_of_the_list_and_its_windows_show_the_one_before() {
+    let mut toy = toy(60, 8);
+    let _ = toy.press(":e page/x<CR>:e page/y<CR>");
+    assert_eq!(toy.screen().rows[0], " page/home  page/x  page/y");
+
+    let _ = toy.press("<Space>bd");
+    assert_eq!(toy.app.deleted, ["page/y"]);
+    assert_eq!(
+        toy.kit.buffer(toy.kit.current_buffer()).name(),
+        "page/x",
+        "the one before"
+    );
+    assert_eq!(toy.screen().rows[0], " page/home  page/x");
+    assert!(
+        !toy.kit
+            .buffer(toy.kit.find_buffer("page/y").unwrap())
+            .doc()
+            .contains("head"),
+        "emptied"
+    );
+
+    // By name, another than the current one; its jumps go too.
+    let _ = toy.press(":bd page/home<CR>");
+    assert_eq!(toy.app.deleted, ["page/y", "page/home"]);
+    assert_eq!(listed(&toy), ["page/x"]);
+    let _ = toy.press("<C-o>");
+    assert_eq!(toy.kit.buffer(toy.kit.current_buffer()).name(), "page/x");
+
+    // Not the last, nor one the application keeps.
+    let _ = toy.press(":bd<CR>");
+    assert_eq!(cmdline(&toy), "E90: Cannot delete the last buffer");
+    let _ = toy.press(":e page/z<CR>");
+    toy.app.kept = Some("page/z".to_owned());
+    let _ = toy.press(":bd<CR>");
+    assert_eq!(cmdline(&toy), "page/z always shows");
+    assert_eq!(toy.kit.buffer(toy.kit.current_buffer()).name(), "page/z");
+}
+
+#[test]
+fn a_middle_click_on_a_tab_deletes_its_buffer_as_bufferline_s() {
+    let mut toy = toy(60, 8);
+    let _ = toy.press(":e page/x<CR>");
+    assert_eq!(toy.screen().rows[0], " page/home  page/x");
+
+    let _ = mouse(&mut toy, crate::key::Mouse::Middle, 3, 0);
+
+    assert_eq!(toy.app.deleted, ["page/home"]);
+    assert_eq!(listed(&toy), ["page/x"]);
 }
 
 #[test]

@@ -104,6 +104,18 @@ impl Window {
         self.buffer = buffer;
     }
 
+    /// Lets go of `buffer`, deleted: where it left it, and the jumps and tags into it.
+    pub(super) fn forget(&mut self, buffer: BufferId) {
+        self.left.remove(&buffer);
+        let before = self.jumps[..self.jump.min(self.jumps.len())]
+            .iter()
+            .filter(|jump| jump.buffer == buffer)
+            .count();
+        self.jumps.retain(|jump| jump.buffer != buffer);
+        self.jump = self.jump.saturating_sub(before).min(self.jumps.len());
+        self.tags.retain(|tag| tag.buffer != buffer);
+    }
+
     /// The buffer it shows, laid out to fit `area`, its text area, with its folds there.
     pub(super) fn layout<'d, T>(&self, buffers: &'d [Buffer<T>], area: Rect) -> Layout<'d, T> {
         self.layout_of(buffers, self.buffer, area)

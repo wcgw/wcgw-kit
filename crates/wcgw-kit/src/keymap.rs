@@ -976,7 +976,7 @@ fn builtins(leader: Key) -> HashMap<Mode, Table> {
         let newer = Target::Action(Action::JumpNewer);
         bind(&mut normal, notation, newer, "jump forward", Topic::JUMPING);
     }
-    let commands: [(&str, &str, &str, Topic); 32] = [
+    let commands: [(&str, &str, &str, Topic); 33] = [
         ("<F1>", "help", "help", Topic::SEARCHING),
         (
             "<Esc>",
@@ -1004,6 +1004,7 @@ fn builtins(leader: Key) -> HashMap<Mode, Table> {
         ("gt", "bnext", "next buffer", Topic::BUFFERS),
         ("gT", "bprevious", "previous buffer", Topic::BUFFERS),
         ("]b", "bnext", "next buffer", Topic::BUFFERS),
+        ("<leader>bd", "bdelete", "delete buffer", Topic::BUFFERS),
         ("[b", "bprevious", "previous buffer", Topic::BUFFERS),
         (
             "<leader><leader>",
