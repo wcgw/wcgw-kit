@@ -369,11 +369,11 @@ Each app ends each milestone runnable, on its `wcgw-kit` branch.
 
 - [x] Each with its `voight.rs` on voight's `Assessor`, its TOML themes and keys converted to `init.vim`, and its keys
   moved to D12.
-  - **muttrs** (a0a9bdc the port; d14e479, 3c9c076, 04f0667, d9a773a, 21d7572, 75456b3 after): cursors placed by the kit in place of
+  - **muttrs** (a0a9bdc the port; d14e479, 3c9c076, 04f0667, d9a773a, 21d7572, 75456b3, a9072a5 after): cursors placed by the kit in place of
     reopening windows, `'cursorline'`, widths per window (`:vsplit` works), picker verbs for Links, Attachments and
     Labels, `:qa` waiting for Tasks, `prompt_completing` for To: and Attach:, Links found by the text crate before
     the Heatmap shades them, `!` and `|` with the terminal (`Effect::Shell`, piping bytes), Drafts as `.eml` in
-    the configured `editor` again. Commands
+    the configured `editor` again, selecting as ghd does (`x` then down, `<Esc>` clears). Commands
     renamed to letters only (`:notjunk`, `:delmailbox`). History is the kit's, in the same file; `!` lines are no
     longer kept.
   - **ghd** (e81eace the port; a724508, fe49795, 60a0980 after): `CursorLine::Item` in place of drawing the cursor row,
