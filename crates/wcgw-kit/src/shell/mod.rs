@@ -740,6 +740,15 @@ impl<A: App> Kit<A> {
         ]
     }
 
+    /// What the text of the block under the current window's cursor refers to, each once, in the order it reads:
+    /// the links of a commit or a comment, say, to choose from when the cursor isn't on one, as `:browse link` does.
+    #[must_use]
+    pub fn targets_in_block_under_cursor(&self) -> Vec<&A::Target> {
+        let window = self.windows.current();
+        let layout = window.layout(&self.buffers, self.window_area());
+        window.cursor.block_targets(&layout)
+    }
+
     /// What the text under the current window's cursor refers to, if anything.
     #[must_use]
     pub fn target_under_cursor(&self) -> Option<A::Target> {

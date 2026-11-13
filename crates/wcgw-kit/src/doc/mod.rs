@@ -771,4 +771,22 @@ impl<T> Document<T> {
     fn block_target_at(&self, pos: Pos) -> Option<&T> {
         self.blocks[self.block_of(pos.line)].target.as_ref()
     }
+
+    /// What the text of the block holding `line` refers to, each once, in the order it reads.
+    fn targets_in_block(&self, line: usize) -> Vec<&T>
+    where
+        T: PartialEq,
+    {
+        let mut targets: Vec<&T> = Vec::new();
+        let runs = self.blocks[self.block_of(line)]
+            .lines
+            .iter()
+            .flat_map(|shaped| &shaped.runs);
+        for target in runs.filter_map(|run| run.target.as_ref()) {
+            if !targets.contains(&target) {
+                targets.push(target);
+            }
+        }
+        targets
+    }
 }

@@ -175,6 +175,17 @@ impl Cursor {
         doc.block_target_at(self.pos(doc))
     }
 
+    /// What the text of the block under the cursor refers to, each once, in the order it reads: a commit's links,
+    /// say, to choose from when the cursor isn't on one.
+    #[must_use]
+    pub fn block_targets<'d, T: PartialEq>(&self, layout: &Layout<'d, T>) -> Vec<&'d T> {
+        if layout.row_count() == 0 {
+            return Vec::new();
+        }
+        let doc = layout.doc();
+        doc.targets_in_block(self.pos(doc).line)
+    }
+
     /// Moves `count` times by `motion` (a count of 0 counts as 1, as in Vim). A motion that cannot move, such as
     /// `f` for a character that isn't there, leaves the cursor where it is.
     pub fn apply<T>(&mut self, layout: &Layout<'_, T>, motion: Motion, count: usize) {

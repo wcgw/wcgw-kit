@@ -859,6 +859,39 @@ fn a_click_focuses_its_window_and_puts_the_cursor_there() {
 }
 
 #[test]
+fn what_a_block_refers_to_is_listed_each_once_in_the_order_it_reads() {
+    let mut toy = toy(40, 8);
+    let mut doc = page("page/home");
+    doc.push_back(
+        "other",
+        vec![Line::Text(vec![
+            Span::new("elsewhere", Group::UNDERLINED)
+                .with_target(Thing::Link("https://b.com".into())),
+            Span::new(" and ", Group::NORMAL),
+            Span::new("again", Group::UNDERLINED).with_target(Thing::Link("https://b.com".into())),
+        ])],
+    );
+    *toy.kit.current_doc_mut() = doc;
+
+    // On the block's first line, not on a link.
+    assert_eq!(toy.kit.target_under_cursor(), None);
+    assert_eq!(
+        toy.kit.targets_in_block_under_cursor(),
+        [
+            &Thing::Page("page/home/next".into()),
+            &Thing::Link("https://example.com".into())
+        ],
+        "the block's, not the next one's"
+    );
+    let _ = toy.press("2j");
+    assert_eq!(
+        toy.kit.targets_in_block_under_cursor(),
+        [&Thing::Link("https://b.com".into())],
+        "once"
+    );
+}
+
+#[test]
 fn a_click_runs_what_leftmouse_is_mapped_to() {
     let mut toy = toy(40, 8);
     let _ = toy.press(":nnoremap <lt>LeftMouse> :open<lt>CR><CR>");
