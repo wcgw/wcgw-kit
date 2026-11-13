@@ -976,11 +976,18 @@ fn builtins(leader: Key) -> HashMap<Mode, Table> {
         let newer = Target::Action(Action::JumpNewer);
         bind(&mut normal, notation, newer, "jump forward", Topic::JUMPING);
     }
-    let commands: [(&str, &str, &str, Topic); 22] = [
+    let commands: [(&str, &str, &str, Topic); 23] = [
         ("<F1>", "help", "help", Topic::SEARCHING),
         ("<leader>?", "help", "help", Topic::SEARCHING),
         ("<CR>", "open", "open under cursor", Topic::OPENING),
         ("<C-]>", "open", "open under cursor", Topic::OPENING),
+        // A click puts the cursor where it lands; a second opens what's there.
+        (
+            "<2-LeftMouse>",
+            "open",
+            "open what's clicked",
+            Topic::OPENING,
+        ),
         ("<C-t>", "pop", "back from what was opened", Topic::OPENING),
         // Terminals send <C-^> as <C-6> unless the kitty keyboard protocol tells them apart.
         ("<C-^>", "buffer #", "alternate buffer", Topic::BUFFERS),

@@ -851,6 +851,17 @@ fn a_click_runs_what_leftmouse_is_mapped_to() {
 }
 
 #[test]
+fn a_double_click_opens_what_it_lands_on_and_a_click_alone_does_not() {
+    let mut toy = toy(40, 8);
+
+    let clicked = mouse(&mut toy, crate::key::Mouse::Left, 6, 1);
+    let double = mouse(&mut toy, crate::key::Mouse::DoubleLeft, 6, 1);
+
+    assert_eq!(clicked, []);
+    assert_eq!(double, [Effect::OpenUrl("https://example.com".into())]);
+}
+
+#[test]
 fn the_wheel_scrolls_the_window_under_the_pointer() {
     let mut toy = toy(40, 6);
     let mut doc = Document::new();

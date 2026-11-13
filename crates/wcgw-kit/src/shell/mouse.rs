@@ -1,7 +1,7 @@
 //! The mouse (D5), as Neovim has it with `'mouse'` set: the wheel scrolls the window under the pointer, a click
 //! focuses the window it lands in and puts the cursor there, a click on the tabline shows that buffer, and a click on a
-//! picker's list chooses. Clicks are keys too (`<LeftMouse>`, `<2-LeftMouse>`), so a map can make one open what it
-//! lands on.
+//! picker's list chooses. Clicks are keys too (`<LeftMouse>`, `<2-LeftMouse>`): a double click opens what it lands
+//! on, as `<2-LeftMouse>` is mapped to `:open` in every app, and a map can make a single click do so.
 
 use ratatui::layout::Rect;
 
