@@ -390,6 +390,8 @@ Calls made while building, and why; each can be revisited.
 - **The kit has its own shell suite** now (a toy application, 16 tests), for what devnull's doesn't reach: hooks,
   the registries, segments, searching pickers, pictures' budget and `graphics=off`.
 - **`<C-w>q`** is bound, as in Vim.
+- **History is written when quitting**, merged with the file as it is then, rather than at every entry as muttrs
+  did: the kit's core stays free of I/O; a crash loses that run's entries.
 - **Lazy lines** (D3) are not built: no application has needed them yet; slackers' and muttrs' histories are paged
   in by the application, as devnull's logs are.
 - **Following the end**: a window follows a buffer's end only when what changed came from elsewhere than a key, and
