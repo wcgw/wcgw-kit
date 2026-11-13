@@ -976,8 +976,9 @@ fn builtins(leader: Key) -> HashMap<Mode, Table> {
         let newer = Target::Action(Action::JumpNewer);
         bind(&mut normal, notation, newer, "jump forward", Topic::JUMPING);
     }
-    let commands: [(&str, &str, &str, Topic); 23] = [
+    let commands: [(&str, &str, &str, Topic); 24] = [
         ("<F1>", "help", "help", Topic::SEARCHING),
+        ("!", "shell", "run a command", Topic::SEARCHING),
         ("<leader>?", "help", "help", Topic::SEARCHING),
         ("<CR>", "open", "open under cursor", Topic::OPENING),
         ("<C-]>", "open", "open under cursor", Topic::OPENING),

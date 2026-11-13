@@ -26,7 +26,7 @@ use std::time::Duration;
 
 use ratatui::layout::Rect;
 
-use crate::app::{App, BufferId, Effect, Effects, Msg, Wake, WakePurpose};
+use crate::app::{App, BufferId, Effect, Effects, Msg, Shell, Wake, WakePurpose};
 use crate::doc::{
     Cursor, Direction, Document, Layout, Motion, Pattern, SearchOutcome, Selection, SelectionKind,
 };
@@ -1527,6 +1527,10 @@ impl<A: App> Kit<A> {
         let Some(split) = ex::split(line) else {
             return Ok(Vec::new());
         };
+        // `:!CMD`, as Vim's: what `:shell CMD` runs.
+        if split.name.is_empty() && split.bang {
+            return Ok(self.shell(split.args));
+        }
         let trimmed = line
             .trim_start_matches(|c: char| c == ':' || c.is_whitespace())
             .trim_end();
@@ -1653,6 +1657,7 @@ impl<A: App> Kit<A> {
             Builtin::Colorscheme if args.is_empty() => self.info(self.theme.name().to_owned()),
             Builtin::Colorscheme => self.theme.colorscheme(args)?,
             Builtin::Source => return Ok(vec![Effect::Source(ex::required(args)?.to_owned())]),
+            Builtin::Shell => return Ok(self.shell(args)),
             Builtin::Edit if args.is_empty() => {
                 let current = self.windows.current().buffer;
                 return app
@@ -1716,6 +1721,18 @@ impl<A: App> Kit<A> {
             };
         }
         effects
+    }
+
+    /// `:shell CMD` and `:!CMD`: runs `CMD` with the terminal, which waits for Enter after; alone, asks which, and
+    /// with nothing typed, starts the user's shell (`$SHELL`, else `sh`), as Vim's `:shell`.
+    fn shell(&mut self, command: &str) -> Effects<A> {
+        if command.is_empty() {
+            self.prompt("!", false, |_: &mut A, _: &mut Self, typed: String| {
+                shell_running::<A>(typed.trim())
+            });
+            return Vec::new();
+        }
+        shell_running::<A>(command)
     }
 
     fn close_window(&mut self) -> Result<(), String> {
@@ -1893,4 +1910,17 @@ fn remember(history: &mut Vec<String>, entry: &str) {
     }
     history.retain(|old| old != entry);
     history.push(entry.to_owned());
+}
+
+/// Runs `command` with the terminal, waiting for Enter after; with none, the user's shell (`$SHELL`, else `sh`),
+/// which comes back when it exits.
+fn shell_running<A: App>(command: &str) -> Effects<A> {
+    if command.is_empty() {
+        let shell = std::env::var("SHELL")
+            .ok()
+            .filter(|shell| !shell.trim().is_empty())
+            .unwrap_or_else(|| "sh".to_owned());
+        return vec![Effect::Shell(Shell::new(shell))];
+    }
+    vec![Effect::Shell(Shell::new(command).wait())]
 }

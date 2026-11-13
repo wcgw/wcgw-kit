@@ -359,6 +359,24 @@ fn what_the_editor_saved_goes_to_the_application() {
 }
 
 #[test]
+fn shell_and_bang_run_a_command_with_the_terminal_and_alone_ask_which() {
+    let mut toy = toy(40, 8);
+    let date = || Effect::Shell(crate::app::Shell::new("date").wait());
+
+    assert_eq!(toy.press(":shell date<CR>"), [date()]);
+    assert_eq!(toy.press(":!date<CR>"), [date()]);
+    assert_eq!(toy.press("!"), []);
+    assert_eq!(cmdline(&toy), "!", "asks which");
+    assert_eq!(toy.press("date<CR>"), [date()]);
+    // Nothing typed: the user's shell, which comes back by itself.
+    let effects = toy.press("!<CR>");
+    assert!(
+        matches!(effects.as_slice(), [Effect::Shell(shell)] if !shell.wait && shell.stdin.is_none()),
+        "{effects:?}"
+    );
+}
+
+#[test]
 fn a_shell_command_that_fails_says_so_as_vim_does() {
     let mut toy = toy(40, 8);
 

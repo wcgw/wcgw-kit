@@ -109,6 +109,7 @@ pub(crate) enum Builtin {
     Highlight,
     Colorscheme,
     Source,
+    Shell,
     Messages,
     Help,
     Split(bool),
@@ -247,6 +248,12 @@ const BUILT_IN: &[(&str, usize, Builtin, &str)] = &[
         "load a colorscheme, or show which",
     ),
     ("source", 2, Builtin::Source, "run a file of ex commands"),
+    (
+        "shell",
+        2,
+        Builtin::Shell,
+        "run a command with the terminal (:!CMD too); alone, ask which, or the shell",
+    ),
     ("messages", 3, Builtin::Messages, "the messages shown"),
     ("split", 2, Builtin::Split(false), "split the window"),
     (
