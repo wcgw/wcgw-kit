@@ -2133,7 +2133,7 @@ dependencies = [
 
 [[package]]
 name = "wcgw-kit"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "crossterm",
  "futures-util",
@@ -2151,7 +2151,7 @@ dependencies = [
 
 [[package]]
 name = "wcgw-kit-gfx"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64",
  "image",
@@ -2159,7 +2159,7 @@ dependencies = [
 
 [[package]]
 name = "wcgw-kit-text"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64",
  "ego-tree",
