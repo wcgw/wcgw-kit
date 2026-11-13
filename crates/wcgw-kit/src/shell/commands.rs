@@ -132,7 +132,10 @@ pub(crate) enum Builtin {
 impl Builtin {
     /// Whether it takes a `!`.
     fn bang(self) -> bool {
-        matches!(self, Self::Quit | Self::QuitAll | Self::Edit)
+        matches!(
+            self,
+            Self::Quit | Self::QuitAll | Self::Edit | Self::Bdelete
+        )
     }
 }
 

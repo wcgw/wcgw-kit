@@ -317,6 +317,24 @@ fn bdelete_takes_a_buffer_out_of_the_list_and_its_windows_show_the_one_before() 
 }
 
 #[test]
+fn bdelete_keeps_a_buffer_with_a_draft_unless_with_a_bang_as_vim_keeps_one_with_changes() {
+    let mut toy = composing(60, 8);
+    let home = toy.kit.current_buffer();
+    let _ = toy.press("ihello<Esc>:e page/x<CR>");
+
+    let _ = toy.press(":bd page/home<CR>");
+    assert_eq!(
+        cmdline(&toy),
+        "E89: page/home has a draft not sent (add ! to drop it)"
+    );
+    assert_eq!(listed(&toy), ["page/home", "page/x"]);
+
+    let _ = toy.press(":bd! page/home<CR>");
+    assert_eq!(listed(&toy), ["page/x"]);
+    assert!(toy.kit.composer(home).is_none(), "the draft went with it");
+}
+
+#[test]
 fn a_middle_click_on_a_tab_deletes_its_buffer_as_bufferline_s() {
     let mut toy = toy(60, 8);
     let _ = toy.press(":e page/x<CR>");

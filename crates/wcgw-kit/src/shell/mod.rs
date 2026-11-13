@@ -516,15 +516,32 @@ impl<A: App> Kit<A> {
     }
 
     /// `:bdelete` (`<leader>bd`, a middle click on its tab): takes buffer `id` out of the list once the application
-    /// lets it go ([`App::deleting`]), and empties it; the windows showing it show the buffer shown before it.
+    /// lets it go ([`App::deleting`]), and empties it, its composer too; the windows showing it show the buffer shown
+    /// before it. A draft in its composer keeps it, unless `force` (`:bd!`), as Vim keeps a buffer with changes.
     ///
     /// # Errors
     ///
-    /// Vim's E516 for a buffer that isn't listed, E90 for the last listed one, or the application's reason to keep
-    /// it.
-    pub fn delete_buffer(&mut self, app: &mut A, id: BufferId) -> Result<Effects<A>, String> {
+    /// Vim's E516 for a buffer that isn't listed, E89 for a draft not sent, E90 for the last listed buffer, or the
+    /// application's reason to keep it.
+    pub fn delete_buffer(
+        &mut self,
+        app: &mut A,
+        id: BufferId,
+        force: bool,
+    ) -> Result<Effects<A>, String> {
         if !self.buffers.get(id.0).is_some_and(|buffer| buffer.listed) {
             return Err("E516: No buffers were deleted".to_owned());
+        }
+        if !force
+            && self
+                .composers
+                .get(&id)
+                .is_some_and(|composer| !composer.is_empty())
+        {
+            return Err(format!(
+                "E89: {} has a draft not sent (add ! to drop it)",
+                self.buffers[id.0].name
+            ));
         }
         let instead = self
             .recent
@@ -544,6 +561,10 @@ impl<A: App> Kit<A> {
         }
         self.recent.retain(|&recent| recent != id);
         self.shown.retain(|&shown| shown != id);
+        if matches!(self.mode, Mode_::Insert(typing) if typing == id) {
+            self.mode = Mode_::Normal;
+        }
+        self.composers.remove(&id);
         let buffer = &mut self.buffers[id.0];
         buffer.listed = false;
         buffer.deleted = true;
@@ -1768,7 +1789,7 @@ impl<A: App> Kit<A> {
                 } else {
                     self.buffer_named(args)?
                 };
-                return self.delete_buffer(app, id);
+                return self.delete_buffer(app, id, bang);
             }
             Builtin::Open => {
                 return self.following(app, |app, kit| match kit.target_under_cursor() {

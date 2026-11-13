@@ -51,7 +51,7 @@ impl<A: App> Kit<A> {
             };
             // A middle click closes the tab, as bufferline's does.
             if mouse == Mouse::Middle {
-                return match self.delete_buffer(app, id) {
+                return match self.delete_buffer(app, id, false) {
                     Ok(effects) => effects,
                     Err(error) => {
                         self.error(error);

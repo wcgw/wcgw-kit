@@ -188,7 +188,7 @@ Shared verbs (a convention in the docs, not enforced): apps use these keys where
 | `x` / `A` | Select and move down / all shown, or none (`:toggle`, `:toggle!`) |
 | `<Esc>` | Hide the search's matches (`:nohlsearch`, the kit's); in ghd and muttrs, then the selection, then the filter (`:clear`) |
 | `]b` / `[b` | Next and previous buffer, as `gt` / `gT` (the kit's) |
-| `<leader>bd`, a middle click on a tab | Close the buffer (`:bdelete`; the kit's): the app lets it go (`App::deleting`) or says why not |
+| `<leader>bd`, a middle click on a tab | Close the buffer (`:bdelete`; the kit's): the app lets it go (`App::deleting`) or says why not; a draft keeps it, unless `:bd!` |
 | `<leader>f…` | Find, as fzf-lua's: `ff` the app's own (people, Notifications by filter, a Mailbox, a Conversation), `fb` buffers, `fh` help, `fk` keys, `fC` commands, `fj` jumps (the kit's) |
 | `]h` / `[h` | Next and previous hunk, as gitsigns' (ghd's diffs) |
 | `a` | Out of the inbox: archive (muttrs), Done (ghd) |
