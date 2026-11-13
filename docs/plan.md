@@ -411,7 +411,7 @@ Calls made while building, and why; each can be revisited.
   windows of a size, winbars, following the end, cursorline, verbs.
 - **`<C-w>q`** is bound, as in Vim.
 - **The apps built against the kit's working tree** (path dependencies, D18) while it changed: twice an agent caught
-  it mid-edit and checked against a `git archive` of the kit's HEAD instead. Every commit of the kit builds; M8's
+  it mid-edit and checked against a `git archive` of the kit's HEAD instead. The kit was tested before each commit; M8's
   pinned revisions end this.
 - **Still open, from the ports**: a span carries one highlight group, so ghd lays its read/unread/selected styles
   over a View's when drawing it, and `:hi` on those shows at the next redraw; a buffer shown in two windows of
