@@ -85,6 +85,13 @@ pub trait App: Sized + 'static {
         Vec::new()
     }
 
+    /// The command [`Effect::Shell`] ran exited with `status`: its code, or why it could not run or was stopped. The
+    /// kit has said so already when it failed (`shell returned 1`), as Vim does.
+    fn shelled(&mut self, kit: &mut Kit<Self>, status: Result<i32, String>) -> Effects<Self> {
+        let _ = (kit, status);
+        Vec::new()
+    }
+
     /// The terminal is `width` × `height` cells now: the application may reshape its windows (D11), as a thread
     /// beside its conversation that a narrow screen can't hold.
     fn resized(&mut self, kit: &mut Kit<Self>, width: u16, height: u16) -> Effects<Self> {
@@ -179,6 +186,8 @@ pub enum Msg<M> {
     Paste(String),
     /// The editor opened by [`Effect::Edit`] closed: what it saved, or why there is nothing.
     Edited(Result<String, String>),
+    /// The command [`Effect::Shell`] ran exited: with this code, or why it could not run or was stopped.
+    Shelled(Result<i32, String>),
     /// A picture asked for by [`Effect::Picture`], prepared as asked, or why it could not be.
     Picture {
         /// Where it is.
@@ -217,6 +226,87 @@ pub enum Msg<M> {
     App(M),
 }
 
+/// What [`Effect::Edit`] hands the editor: a file holding `text`, named with `suffix` so the editor knows its kind
+/// (`md` unless told), opened with `editor` when given, else the user's (`$EDITOR`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Edit {
+    /// What the file holds.
+    pub text: String,
+    /// What its name ends with, after a dot: `md`, `eml`.
+    pub suffix: String,
+    /// A shell command to open it with, in place of the user's editor; the file's path follows it.
+    pub editor: Option<String>,
+}
+
+impl Edit {
+    /// `text`, in a Markdown file, for the user's editor.
+    #[must_use]
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            suffix: "md".to_owned(),
+            editor: None,
+        }
+    }
+
+    /// In a file whose name ends with `.suffix`, as `eml` for a mail.
+    #[must_use]
+    pub fn suffix(self, suffix: impl Into<String>) -> Self {
+        Self {
+            suffix: suffix.into(),
+            ..self
+        }
+    }
+
+    /// Opened with `editor`, a shell command the file's path follows, rather than the user's.
+    #[must_use]
+    pub fn editor(self, editor: impl Into<String>) -> Self {
+        Self {
+            editor: Some(editor.into()),
+            ..self
+        }
+    }
+}
+
+/// What [`Effect::Shell`] runs: `command`, by `sh -c`, with the terminal; reading `stdin` when given, else the
+/// terminal; and, when it should `wait`, asking for Enter once it exits, so what it printed can be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Shell {
+    /// The command line.
+    pub command: String,
+    /// What it reads, as a message piped to it; the terminal when `None`.
+    pub stdin: Option<String>,
+    /// Whether to wait for Enter once it exits, before the application shows again.
+    pub wait: bool,
+}
+
+impl Shell {
+    /// `command`, reading the terminal, not waiting once it exits.
+    #[must_use]
+    pub fn new(command: impl Into<String>) -> Self {
+        Self {
+            command: command.into(),
+            stdin: None,
+            wait: false,
+        }
+    }
+
+    /// Reading `text`, as `|` pipes a message.
+    #[must_use]
+    pub fn stdin(self, text: impl Into<String>) -> Self {
+        Self {
+            stdin: Some(text.into()),
+            ..self
+        }
+    }
+
+    /// Asking for Enter once it exits, as `:!` does, so its output can be read.
+    #[must_use]
+    pub fn wait(self) -> Self {
+        Self { wait: true, ..self }
+    }
+}
+
 /// Something the kit or the application asks the runtime to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect<M, E> {
@@ -249,11 +339,11 @@ pub enum Effect<M, E> {
         /// What it says.
         body: String,
     },
-    /// Hand the terminal to the user's editor on `text`, then send [`Msg::Edited`].
-    Edit {
-        /// What the editor opens.
-        text: String,
-    },
+    /// Hand the terminal to the user's editor on a file of text, then send [`Msg::Edited`].
+    Edit(Edit),
+    /// Hand the terminal to a shell command until it exits, then send [`Msg::Shelled`]: `!` and `|`, as Vim's and
+    /// mutt's.
+    Shell(Shell),
     /// Open this link in the browser.
     OpenUrl(String),
     /// Send [`Msg::Wake`] with `token` once `after` has passed.

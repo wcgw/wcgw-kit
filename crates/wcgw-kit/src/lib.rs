@@ -17,7 +17,7 @@ pub mod shell;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
-pub use app::{App, BufferId, Effect, Effects, Msg, Quitting};
+pub use app::{App, BufferId, Edit, Effect, Effects, Msg, Quitting, Shell};
 pub use shell::Kit;
 /// Pictures in the terminal (D15).
 pub use wcgw_kit_gfx as gfx;

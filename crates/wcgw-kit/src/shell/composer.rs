@@ -373,9 +373,7 @@ impl<A: App> Kit<A> {
         };
         if std::mem::take(&mut composer.ctrl_x) && key == ctrl('e') {
             self.editor_ours = Some(id);
-            return vec![Effect::Edit {
-                text: composer.text(),
-            }];
+            return vec![Effect::Edit(crate::app::Edit::new(composer.text()))];
         }
         let menu = !composer.suggestions.is_empty();
         let count = composer.suggestions.len();

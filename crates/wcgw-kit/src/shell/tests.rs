@@ -168,9 +168,7 @@ fn toy(width: u16, height: u16) -> Harness<Toy> {
         }),
     );
     kit.add_command(Command::new("compose", 4, |_: &mut Toy, _, line| {
-        Ok(vec![Effect::Edit {
-            text: line.args.to_owned(),
-        }])
+        Ok(vec![Effect::Edit(crate::app::Edit::new(line.args))])
     }));
     kit.add_command(
         Command::new("forced", 3, |_: &mut Toy, kit, line| {
@@ -353,13 +351,21 @@ fn what_the_editor_saved_goes_to_the_application() {
 
     assert_eq!(
         toy.press(":comp draft<CR>"),
-        [Effect::Edit {
-            text: "draft".into()
-        }]
+        [Effect::Edit(crate::app::Edit::new("draft"))]
     );
     let _ = toy.update(Msg::Edited(Ok("saved".into())));
 
     assert_eq!(toy.app.edited, [Ok("saved".to_owned())]);
+}
+
+#[test]
+fn a_shell_command_that_fails_says_so_as_vim_does() {
+    let mut toy = toy(40, 8);
+
+    let _ = toy.update(Msg::Shelled(Ok(0)));
+    assert_eq!(cmdline(&toy), "");
+    let _ = toy.update(Msg::Shelled(Ok(2)));
+    assert_eq!(cmdline(&toy), "shell returned 2");
 }
 
 #[test]
@@ -645,12 +651,7 @@ fn ctrl_x_ctrl_e_edits_the_text_in_the_editor() {
     let mut toy = composing(40, 10);
 
     let effects = toy.press("idraft<C-x><C-e>");
-    assert_eq!(
-        effects,
-        [Effect::Edit {
-            text: "draft".into()
-        }]
-    );
+    assert_eq!(effects, [Effect::Edit(crate::app::Edit::new("draft"))]);
     let _ = toy.update(Msg::Edited(Ok("edited\n".into())));
 
     let id = toy.kit.current_buffer();

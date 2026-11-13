@@ -429,6 +429,10 @@ Calls made while building, and why; each can be revisited.
   selection, no `<C-w>` into it.
 - **Pictures in winbars**: `Buffer::set_winbar_spans` takes the document's spans, so `Span::picture` (an
   avatar, a channel's icon) goes in a winbar as in text; `set_winbar` stays for text in groups.
+- **The terminal handed to a command** (muttrs' `!` and `|`): `Effect::Shell(Shell::new(cmd).stdin(text).wait())`
+  runs `sh -c` with the terminal, as `$EDITOR` gets it, and sends `Msg::Shelled` with the exit code to
+  `App::shelled`; the kit says `shell returned N` first, as Vim. `Effect::Edit` became `Effect::Edit(Edit)` with
+  `.suffix("eml")` and `.editor(cmd)` (a breaking change; devnull and muttrs follow).
 - **Any quit frees the pictures**: `Kit::update` puts the escapes deleting what the terminal holds before an
   `Effect::Quit`, the application's own (after `Quitting::Later`) as the kit's.
 - **The composer's hooks**: `on_key` sees a key before the text area does and may take it, `on_word` hears the word

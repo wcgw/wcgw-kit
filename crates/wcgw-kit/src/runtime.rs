@@ -218,10 +218,17 @@ async fn run_loop<A: App, P: Perform<A>>(
             match perform(effect, &mut performer)? {
                 Step::Go => {}
                 Step::Quit => return Ok(()),
-                Step::Edit(text) => {
+                Step::Shell(shell) => {
+                    // The command reads the keys until it exits: stop reading them meanwhile.
+                    drop(events);
+                    let status = terminal.shell(&shell)?;
+                    events = EventStream::new();
+                    inbox.kit(Msg::Shelled(status));
+                }
+                Step::Edit(edit) => {
                     // The editor reads the keys until it exits: stop reading them meanwhile.
                     drop(events);
-                    let saved = terminal.edit(name, &text)?;
+                    let saved = terminal.edit(name, &edit)?;
                     events = EventStream::new();
                     inbox.kit(Msg::Edited(saved));
                 }
@@ -270,8 +277,10 @@ fn first_picture_id() -> u32 {
 enum Step {
     Go,
     Quit,
-    /// Hand the terminal to the editor on this text.
-    Edit(String),
+    /// Hand the terminal to the editor.
+    Edit(crate::app::Edit),
+    /// Hand the terminal to a shell command.
+    Shell(crate::app::Shell),
 }
 
 /// How pictures are got and sent: so many at once, through `transport`, run by the terminal when it `animates`.
@@ -291,7 +300,8 @@ fn perform<A: App, P: Perform<A>>(
 ) -> io::Result<Step> {
     match effect {
         Effect::Quit => return Ok(Step::Quit),
-        Effect::Edit { text } => return Ok(Step::Edit(text)),
+        Effect::Edit(edit) => return Ok(Step::Edit(edit)),
+        Effect::Shell(shell) => return Ok(Step::Shell(shell)),
         Effect::Copy(text) => execute!(stdout(), CopyToClipboard::to_clipboard_from(text))?,
         Effect::Wake { after, token } => {
             let inbox = inbox.clone();
@@ -441,9 +451,15 @@ fn drafts_dir() -> PathBuf {
 /// Runs `editor` (a shell command, as `$EDITOR` may hold arguments) on a file of `dir` holding `text`, named for
 /// application `name`, readable by the user alone and removed after; what it saved, or why there is nothing: it
 /// could not run, or exited with an error (`:cq`).
-fn run_editor(editor: &str, dir: &Path, name: &str, text: &str) -> Result<String, String> {
+fn run_editor(
+    editor: &str,
+    dir: &Path,
+    name: &str,
+    text: &str,
+    suffix: &str,
+) -> Result<String, String> {
     let path = dir.join(format!(
-        "{name}-draft-{}-{}.md",
+        "{name}-draft-{}-{}.{suffix}",
         std::process::id(),
         EDITS.fetch_add(1, Ordering::SeqCst)
     ));
@@ -475,6 +491,28 @@ fn run_editor(editor: &str, dir: &Path, name: &str, text: &str) -> Result<String
         }),
         Ok(_) => saved.map_err(|error| format!("cannot read the draft: {error}")),
     }
+}
+
+/// Runs `shell`'s command by `sh -c`, piping its `stdin` when given; its exit code, or why there is none.
+fn run_shell(shell: &crate::app::Shell) -> Result<i32, String> {
+    let mut command = std::process::Command::new("sh");
+    command.arg("-c").arg(&shell.command);
+    if shell.stdin.is_some() {
+        command.stdin(std::process::Stdio::piped());
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("cannot run {}: {error}", shell.command))?;
+    if let (Some(text), Some(mut stdin)) = (&shell.stdin, child.stdin.take()) {
+        // A command that stops reading early (`head`) closes the pipe: not an error of ours.
+        let _ = io::Write::write_all(&mut stdin, text.as_bytes());
+    }
+    let status = child
+        .wait()
+        .map_err(|error| format!("cannot run {}: {error}", shell.command))?;
+    status
+        .code()
+        .ok_or_else(|| format!("{} was stopped", shell.command))
 }
 
 /// `path` with a leading `~` standing for `home`, when there is one.
@@ -633,11 +671,32 @@ impl Session {
 
     /// Hands the terminal to the user's editor on `text` until it exits, then takes it back; what it saved, or why
     /// there is nothing.
-    fn edit(&mut self, name: &str, text: &str) -> io::Result<Result<String, String>> {
+    fn edit(&mut self, name: &str, edit: &crate::app::Edit) -> io::Result<Result<String, String>> {
+        let editor = edit.editor.clone().unwrap_or_else(editor);
+        self.handing_over(|| run_editor(&editor, &drafts_dir(), name, &edit.text, &edit.suffix))
+    }
+
+    /// Hands the terminal to `shell`'s command until it exits, and Enter is pressed if it should wait; its code,
+    /// or why it could not run or was stopped.
+    fn shell(&mut self, shell: &crate::app::Shell) -> io::Result<Result<i32, String>> {
+        self.handing_over(|| {
+            let status = run_shell(shell);
+            if shell.wait {
+                print!("\r\nPress ENTER to continue");
+                let _ = io::Write::flush(&mut stdout());
+                let mut line = String::new();
+                let _ = io::stdin().read_line(&mut line);
+            }
+            status
+        })
+    }
+
+    /// Gives the terminal back to the shell for `run`, then takes it again, blank, in the modes it was in.
+    fn handing_over<R>(&mut self, run: impl FnOnce() -> R) -> io::Result<R> {
         let captured = MOUSE_CAPTURED.load(Ordering::SeqCst);
         leave_modes();
         ratatui::restore();
-        let saved = run_editor(&editor(), &drafts_dir(), name, text);
+        let saved = run();
         crossterm::terminal::enable_raw_mode()?;
         execute!(
             stdout(),
@@ -863,7 +922,7 @@ mod tests {
     fn what_the_editor_saved_comes_back_and_the_draft_file_goes() {
         let dir = tempfile::tempdir().expect("dir");
 
-        let saved = run_editor("printf 'saved' >", dir.path(), "app", "draft");
+        let saved = run_editor("printf 'saved' >", dir.path(), "app", "draft", "md");
 
         assert_eq!(saved, Ok("saved".to_owned()));
         assert_eq!(files(dir.path()), 0);
@@ -873,7 +932,7 @@ mod tests {
     fn an_editor_quitting_with_an_error_gives_nothing() {
         let dir = tempfile::tempdir().expect("dir");
 
-        let saved = run_editor("false", dir.path(), "app", "draft");
+        let saved = run_editor("false", dir.path(), "app", "draft", "md");
 
         assert_eq!(saved, Err("the editor exited with 1".to_owned()));
         assert_eq!(files(dir.path()), 0);
@@ -889,10 +948,41 @@ mod tests {
             dir.path(),
             "app",
             "draft",
+            "md",
         );
-        let edited = run_editor("sed -i s/draft/done/", dir.path(), "app", "a draft");
+        let edited = run_editor("sed -i s/draft/done/", dir.path(), "app", "a draft", "md");
 
         assert_eq!(mode, Ok("600\n".to_owned()));
         assert_eq!(edited, Ok("a done".to_owned()));
+    }
+
+    #[test]
+    fn the_draft_is_named_with_the_suffix_asked_for() {
+        let dir = tempfile::tempdir().expect("dir");
+
+        let named = run_editor(
+            "f() { printf %s \"$1\" > \"$1\"; }; f",
+            dir.path(),
+            "app",
+            "",
+            "eml",
+        );
+
+        let named = std::path::PathBuf::from(named.expect("saved"));
+        assert_eq!(named.extension(), Some(std::ffi::OsStr::new("eml")));
+    }
+
+    #[test]
+    fn a_shell_command_reads_what_is_piped_and_says_how_it_exited() {
+        let piped = crate::app::Shell::new("grep -q needle").stdin("a needle\n");
+        let missing = crate::app::Shell::new("grep -q needle").stdin("hay\n");
+
+        assert_eq!(run_shell(&piped), Ok(0));
+        assert_eq!(run_shell(&missing), Ok(1));
+        assert_eq!(run_shell(&crate::app::Shell::new("exit 3")), Ok(3));
+        assert_eq!(
+            run_shell(&crate::app::Shell::new("kill -9 $$")),
+            Err("kill -9 $$ was stopped".into())
+        );
     }
 }

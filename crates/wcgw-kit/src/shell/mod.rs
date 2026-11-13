@@ -979,6 +979,14 @@ impl<A: App> Kit<A> {
                 _ => Vec::new(),
             },
             Msg::Sourced { path, contents } => self.source(app, &path, contents),
+            Msg::Shelled(status) => {
+                match &status {
+                    Ok(0) => {}
+                    Ok(code) => self.error(format!("shell returned {code}")),
+                    Err(why) => self.error(why.clone()),
+                }
+                app.shelled(self, status)
+            }
             Msg::Edited(saved) => {
                 if let Some(id) = self.editor_ours.take() {
                     self.composer_edited(id, saved);
