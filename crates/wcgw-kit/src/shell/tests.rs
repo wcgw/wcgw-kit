@@ -445,6 +445,24 @@ fn leader_f_finds_buffers_help_keys_commands_and_jumps() {
 }
 
 #[test]
+fn keys_typed_toward_a_binding_show_only_with_showcmd() {
+    let mut toy = toy(40, 8);
+
+    let _ = toy.press("2g");
+    assert_eq!(
+        toy.screen().rows[7],
+        "",
+        "noshowcmd, as the author's Neovim"
+    );
+    let _ = toy.press("<Esc>:set showcmd<CR>2g");
+    assert!(
+        toy.screen().rows[7].ends_with("2g"),
+        "{:#?}",
+        toy.screen().rows
+    );
+}
+
+#[test]
 fn esc_hides_the_search_s_matches() {
     let mut toy = toy(40, 8);
 

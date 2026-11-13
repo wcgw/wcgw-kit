@@ -465,6 +465,9 @@ impl<A: App> Kit<A> {
 
     /// Keys typed toward a binding, with their count, as Vim's `'showcmd'` shows them.
     fn render_showcmd(&self, frame: &mut Frame<'_>, area: Rect) {
+        if !self.options.showcmd {
+            return;
+        }
         let mut pending: String = self
             .keymap
             .pending_count()

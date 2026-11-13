@@ -33,6 +33,9 @@ pub(super) struct Options {
     pub(super) mouse: bool,
     /// Which glyphs icons are drawn with (D9).
     pub(super) icons: IconSet,
+    /// Whether keys typed toward a binding show at the right of the command line: off, as the author's Neovim has
+    /// it (`noshowcmd`), since which-key shows them.
+    pub(super) showcmd: bool,
 }
 
 impl Default for Options {
@@ -49,6 +52,7 @@ impl Default for Options {
             laststatus: 3,
             mouse: true,
             icons: IconSet::Auto,
+            showcmd: false,
         }
     }
 }
@@ -93,6 +97,7 @@ const OPTIONS: &[(&str, &str, Opt)] = &[
     ("smartcase", "scs", Opt::Flag(|o| &mut o.smartcase)),
     ("hlsearch", "hls", Opt::Flag(|o| &mut o.hlsearch)),
     ("incsearch", "is", Opt::Flag(|o| &mut o.incsearch)),
+    ("showcmd", "sc", Opt::Flag(|o| &mut o.showcmd)),
     ("scrolloff", "so", Opt::Count(|o| &mut o.scrolloff)),
     ("timeoutlen", "tm", Opt::Number(|o| &mut o.timeoutlen)),
     (
@@ -117,6 +122,7 @@ pub(super) const HELP: &[(&str, &str)] = &[
     ("smartcase", "unless the pattern has capitals"),
     ("hlsearch", "show the last search's matches"),
     ("incsearch", "show where a search goes while typed"),
+    ("showcmd", "show keys typed toward a binding"),
     ("scrolloff", "rows kept in view around the cursor"),
     ("timeoutlen", "how long keys wait for more, in ms"),
     (
