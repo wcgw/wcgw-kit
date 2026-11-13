@@ -1034,3 +1034,90 @@ fn a_segment_may_have_a_colour_and_a_buffer_a_new_name() {
     let x = u16::try_from(status.find("down").expect("shown")).expect("a column");
     assert_eq!(toy.style_at(x, 6).fg, toy.kit.style(Group::ERROR_MSG).fg);
 }
+
+#[test]
+fn a_picker_s_verbs_act_on_the_choice_and_its_border_says_them() {
+    let mut toy = toy(60, 16);
+    let _ = toy.press(":e page/x<CR>");
+    toy.kit.add_picker("pages", |_, kit| {
+        let choices = kit
+            .listed()
+            .into_iter()
+            .map(|id| Choice {
+                label: vec![(kit.buffer(id).name().to_owned(), Group::NORMAL_FLOAT)],
+                text: kit.buffer(id).name().to_owned(),
+                pick: Pick::Target(Thing::Link(kit.buffer(id).name().to_owned())),
+            })
+            .collect();
+        Picker::list("Pages", choices, "none").verb("<C-y>", "copy", |_, _, pick| match pick {
+            Pick::Target(Thing::Link(name)) => vec![Effect::Copy(name)],
+            _ => Vec::new(),
+        })
+    });
+
+    let _ = toy.press(":pick pages<CR>");
+    assert!(
+        toy.screen()
+            .rows
+            .iter()
+            .any(|row| row.contains("<C-y> copy"))
+    );
+    let prompt = toy
+        .screen()
+        .rows
+        .iter()
+        .position(|row| row.contains("> "))
+        .expect("its query");
+    let _ = mouse(
+        &mut toy,
+        crate::key::Mouse::WheelDown,
+        30,
+        u16::try_from(prompt + 1).expect("row"),
+    );
+
+    assert_eq!(toy.press("<C-y>"), [Effect::Copy("page/x".into())]);
+    assert!(
+        !toy.screen().rows.iter().any(|row| row.contains("Pages")),
+        "closed"
+    );
+}
+
+#[test]
+fn the_application_may_take_keys_hear_words_and_hear_insert_mode_end() {
+    let mut toy = composing(40, 10);
+    let id = toy.kit.current_buffer();
+    let composer = Composer::new("message")
+        .on_key(|toy: &mut Toy, kit, id, key| {
+            (key.code == crate::key::Code::Up && kit.composer(id).is_some_and(Composer::is_empty))
+                .then(|| {
+                    toy.typed.push("up".into());
+                    Vec::new()
+                })
+        })
+        .on_word(|_: &mut Toy, _, _, word| {
+            if word.text.starts_with('@') {
+                vec![Effect::App(ToyEffect::Search(word.text.to_owned()))]
+            } else {
+                Vec::new()
+            }
+        })
+        .on_leave(|toy: &mut Toy, _, _| {
+            toy.typed.push("left".into());
+            Vec::new()
+        });
+    toy.kit.set_composer(id, composer);
+
+    let _ = toy.press("i<Up>");
+    assert_eq!(toy.app.typed, ["up"]);
+    let effects = toy.press("@a");
+    assert_eq!(
+        effects.last(),
+        Some(&Effect::App(ToyEffect::Search("@a".into())))
+    );
+    let _ = toy.press("<Up><Esc>");
+    assert_eq!(
+        toy.app.typed,
+        ["up", "left"],
+        "Up went to the text once it had some"
+    );
+}

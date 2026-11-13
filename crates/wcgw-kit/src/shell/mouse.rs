@@ -23,8 +23,14 @@ impl<A: App> Kit<A> {
         match &self.mode {
             Mode_::Picker(_) => return self.picker_click(app, mouse, column, row),
             Mode_::Cmdline(_) | Mode_::Confirm(_) | Mode_::MorePrompt { .. } => return Vec::new(),
-            Mode_::Insert(_) if matches!(mouse, Mouse::Left | Mouse::DoubleLeft) => {
+            Mode_::Insert(id) if matches!(mouse, Mouse::Left | Mouse::DoubleLeft) => {
+                let id = *id;
                 self.mode = Mode_::Normal;
+                let mut effects = self.left_insert(app, id);
+                if !effects.is_empty() {
+                    effects.extend(self.mouse(app, mouse, column, row));
+                    return effects;
+                }
             }
             Mode_::Normal | Mode_::Visual(_) | Mode_::Insert(_) => {}
         }

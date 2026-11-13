@@ -5,6 +5,7 @@
 mod tests;
 
 use std::fmt;
+use std::fmt::Write as _;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -57,6 +58,9 @@ pub enum Pick<T> {
 /// What a search does: asks for what the query finds, to come back through [`Picker::found`].
 pub type Search<A> = Rc<dyn Fn(&mut A, &mut Kit<A>, String) -> Effects<A>>;
 
+/// What a verb does with the choice it's typed on.
+pub type Verb<A> = Rc<dyn Fn(&mut A, &mut Kit<A>, Pick<<A as App>::Target>) -> Effects<A>>;
+
 /// What makes an application's picker, as `:pick {name}` opens it.
 pub type Make<A> = Rc<dyn Fn(&mut A, &mut Kit<A>) -> Picker<A>>;
 
@@ -88,6 +92,8 @@ pub struct Picker<A: App> {
     /// What to say while nothing is shown.
     hint: String,
     source: Source<A>,
+    /// Keys doing something else than `<CR>` with the choice: copying a link rather than opening it, say.
+    verbs: Vec<(Key, &'static str, Verb<A>)>,
 }
 
 impl<A: App> fmt::Debug for Picker<A> {
@@ -107,6 +113,8 @@ enum Outcome<T> {
     Changed,
     /// `<CR>`: open the chosen one, if any.
     Picked(Option<Pick<T>>),
+    /// A verb's key, on the chosen one.
+    Verb(usize, Pick<T>),
     /// `<Esc>`, `<C-c>`.
     Leave,
 }
@@ -168,6 +176,7 @@ impl<A: App> Picker<A> {
             selected: 0,
             hint: hint.into(),
             source: Source::List,
+            verbs: Vec::new(),
         };
         picker.narrow();
         picker
@@ -193,7 +202,23 @@ impl<A: App> Picker<A> {
                 search: Rc::new(search),
                 idle,
             },
+            verbs: Vec::new(),
         }
+    }
+
+    /// Makes `key` (Vim notation, such as `<C-y>`) do `run` with the chosen choice, closing the picker, as `<CR>`
+    /// opens it; its border says `key` and `description`.
+    #[must_use]
+    pub fn verb(
+        mut self,
+        key: &str,
+        description: &'static str,
+        run: impl Fn(&mut A, &mut Kit<A>, Pick<A::Target>) -> Effects<A> + 'static,
+    ) -> Self {
+        if let [key] = crate::key::parse_keys(key, Key::char(' '))[..] {
+            self.verbs.push((key, description, Rc::new(run)));
+        }
+        self
     }
 
     /// Its title.
@@ -281,6 +306,12 @@ impl<A: App> Picker<A> {
             mods: Mods::CTRL,
         };
         let count = self.shown.len();
+        if let Some(at) = self.verbs.iter().position(|(verb, ..)| *verb == key) {
+            return match self.chosen() {
+                Some(pick) => Outcome::Verb(at, pick),
+                None => Outcome::Stay,
+            };
+        }
         match key {
             k if k == ctrl('n') || k.code == Code::Down => {
                 if count > 0 {
@@ -447,6 +478,11 @@ impl<A: App> Kit<A> {
                 self.mode = Mode_::Normal;
                 Vec::new()
             }
+            Outcome::Verb(at, pick) => {
+                let run = Rc::clone(&picker.verbs[at].2);
+                self.mode = Mode_::Normal;
+                run(app, self, pick)
+            }
             Outcome::Picked(pick) => {
                 self.mode = Mode_::Normal;
                 match pick {
@@ -536,6 +572,20 @@ impl<A: App> Kit<A> {
         let Mode_::Picker(picker) = &mut self.mode else {
             return Vec::new();
         };
+        let count = picker.shown.len();
+        if count > 0
+            && matches!(
+                mouse,
+                crate::key::Mouse::WheelDown | crate::key::Mouse::WheelUp
+            )
+        {
+            picker.selected = if mouse == crate::key::Mouse::WheelDown {
+                (picker.selected + 1).min(count - 1)
+            } else {
+                picker.selected.saturating_sub(1)
+            };
+            return Vec::new();
+        }
         if index >= picker.shown.len() {
             return Vec::new();
         }
@@ -552,8 +602,16 @@ impl<A: App> Kit<A> {
     pub(super) fn render_picker(&self, frame: &mut Frame<'_>, picker: &Picker<A>) -> Position {
         let area = self.picker_area(picker);
         let title = format!(" {} ", picker.title);
+        let verbs = picker
+            .verbs
+            .iter()
+            .fold(String::new(), |mut verbs, (key, description, _)| {
+                let _ = write!(verbs, " {key} {description} ");
+                verbs
+            });
         let block = Block::bordered()
             .title(title)
+            .title_bottom(ratatui::text::Line::from(verbs).right_aligned())
             .border_style(self.theme.style(Group::FLOAT_BORDER))
             .style(self.theme.style(Group::NORMAL_FLOAT));
         let inner = block.inner(area);

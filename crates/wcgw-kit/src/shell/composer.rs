@@ -33,6 +33,15 @@ pub type CompleteWord<A> = Rc<dyn Fn(&A, &Kit<A>, BufferId, &Word<'_>) -> Vec<Su
 /// What the application does when a suggestion is put in place, such as remembering whom an @-mention names.
 pub type Accepted<A> = Rc<dyn Fn(&mut A, &mut Kit<A>, BufferId, &Suggestion) -> Effects<A>>;
 
+/// A key the application takes before the composer does: `Some` when it handled it.
+pub type OnKey<A> = Rc<dyn Fn(&mut A, &mut Kit<A>, BufferId, Key) -> Option<Effects<A>>>;
+
+/// What the application does as the word before the cursor changes, such as asking a server whom a name finds.
+pub type OnWord<A> = Rc<dyn Fn(&mut A, &mut Kit<A>, BufferId, &Word<'_>) -> Effects<A>>;
+
+/// What the application does when Insert mode is left, such as giving up an edit left empty.
+pub type OnLeave<A> = Rc<dyn Fn(&mut A, &mut Kit<A>, BufferId) -> Effects<A>>;
+
 /// The word before the cursor, as completion sees it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Word<'a> {
@@ -63,6 +72,9 @@ pub struct Composer<A: App> {
     send: Option<Send<A>>,
     complete: Option<CompleteWord<A>>,
     accepted: Option<Accepted<A>>,
+    on_key: Option<OnKey<A>>,
+    on_word: Option<OnWord<A>>,
+    on_leave: Option<OnLeave<A>>,
     /// What the word before the cursor may become, while it may become something.
     suggestions: Vec<Suggestion>,
     selected: usize,
@@ -93,6 +105,9 @@ impl<A: App> Composer<A> {
             send: None,
             complete: None,
             accepted: None,
+            on_key: None,
+            on_word: None,
+            on_leave: None,
             suggestions: Vec::new(),
             selected: 0,
             ctrl_x: false,
@@ -139,6 +154,44 @@ impl<A: App> Composer<A> {
         Self {
             complete: Some(Rc::new(complete)),
             accepted: Some(Rc::new(accepted)),
+            ..self
+        }
+    }
+
+    /// Lets the application take keys before the composer does: `on_key` returns `Some` for one it handled, as Up
+    /// in an empty composer editing the last message sent.
+    #[must_use]
+    pub fn on_key(
+        self,
+        on_key: impl Fn(&mut A, &mut Kit<A>, BufferId, Key) -> Option<Effects<A>> + 'static,
+    ) -> Self {
+        Self {
+            on_key: Some(Rc::new(on_key)),
+            ..self
+        }
+    }
+
+    /// Tells the application of the word before the cursor as it changes, with effects of its own, such as asking
+    /// a server whom a name finds; [`Kit::refresh_completion`] then completes with what came back.
+    #[must_use]
+    pub fn on_word(
+        self,
+        on_word: impl Fn(&mut A, &mut Kit<A>, BufferId, &Word<'_>) -> Effects<A> + 'static,
+    ) -> Self {
+        Self {
+            on_word: Some(Rc::new(on_word)),
+            ..self
+        }
+    }
+
+    /// Tells the application when Insert mode is left (`<Esc>`, a click elsewhere).
+    #[must_use]
+    pub fn on_leave(
+        self,
+        on_leave: impl Fn(&mut A, &mut Kit<A>, BufferId) -> Effects<A> + 'static,
+    ) -> Self {
+        Self {
+            on_leave: Some(Rc::new(on_leave)),
             ..self
         }
     }
@@ -302,6 +355,14 @@ impl<A: App> Kit<A> {
 
     /// A key typed into the composer of `id`.
     pub(super) fn insert_key(&mut self, app: &mut A, id: BufferId, key: Key) -> Effects<A> {
+        if let Some(on_key) = self
+            .composers
+            .get(&id)
+            .and_then(|composer| composer.on_key.clone())
+            && let Some(effects) = on_key(app, self, id, key)
+        {
+            return effects;
+        }
         let Some(composer) = self.composers.get_mut(&id) else {
             self.mode = Mode_::Normal;
             return Vec::new();
@@ -324,6 +385,8 @@ impl<A: App> Kit<A> {
             k if k.code == Code::Esc => {
                 composer.suggestions.clear();
                 self.mode = Mode_::Normal;
+                let on_leave = composer.on_leave.clone();
+                return on_leave.map_or_else(Vec::new, |on_leave| on_leave(app, self, id));
             }
             k if menu
                 && (k == ctrl('n')
@@ -348,14 +411,38 @@ impl<A: App> Kit<A> {
             k if k == ctrl('s') => return self.send(app, id),
             k if k.code == Code::Enter || k == ctrl('j') => {
                 composer.area.insert_newline();
-                self.refresh_suggestions(app, id);
+                return self.word_changed(app, id);
             }
             k => {
                 composer.area.input(input(k));
-                self.refresh_suggestions(app, id);
+                return self.word_changed(app, id);
             }
         }
         Vec::new()
+    }
+
+    /// Insert mode in the composer of `id` was left: the application hears of it.
+    pub(super) fn left_insert(&mut self, app: &mut A, id: BufferId) -> Effects<A> {
+        let on_leave = self
+            .composers
+            .get(&id)
+            .and_then(|composer| composer.on_leave.clone());
+        on_leave.map_or_else(Vec::new, |on_leave| on_leave(app, self, id))
+    }
+
+    /// The text of the composer of `id` changed: the application hears of the word before the cursor, then
+    /// completes it.
+    fn word_changed(&mut self, app: &mut A, id: BufferId) -> Effects<A> {
+        let mut effects = Vec::new();
+        if let Some(composer) = self.composers.get(&id)
+            && let (Some(on_word), Some((word, _))) = (composer.on_word.clone(), composer.word())
+        {
+            let text = word.text.to_owned();
+            let first = word.first;
+            effects = on_word(app, self, id, &Word { text: &text, first });
+        }
+        self.refresh_suggestions(app, id);
+        effects
     }
 
     /// Text pasted into the composer of `id`.
