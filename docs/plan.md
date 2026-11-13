@@ -175,15 +175,26 @@ Shared verbs (a convention in the docs, not enforced): apps use these keys where
 
 | Key | Verb |
 | --- | --- |
-| `<CR>` | Open |
-| `K` | Hover, details |
-| `gx` | Open in the browser |
-| `gy` | Yank the link |
+| `<CR>`, a double click | Open (`:open`; the kit binds both) |
+| `K` | Details card (`:details`); again, into it |
+| `gx` | The link under the cursor in the browser (`:browse link`) |
+| `gX` | The thing itself on the web (`:browse`): a commit, a Subject, a Message in Slack; mail has none |
+| `gy` | Yank the link under the cursor, else the thing's (`:yanklink`) |
 | `c` | New |
 | `r` / `R` | Reply / quote |
 | `s` | Star, flag |
+| `x` / `A` | Select and move down / all shown, or none (`:toggle`, `:toggle!`) |
+| `<Esc>` | Clear the selection, else the filter or limit (`:clear`) |
+| `a` | Out of the inbox: archive (muttrs), Done (ghd) |
 | `dd` | Delete |
+| `\` | The sidebar: go to it, hide it from within, bring it back (`:sidebar`) |
+| `q` | Close the window; quit rather than leave a sidebar alone |
 | `<C-l>` | Refresh |
+| `<F1>`, `<leader>?`, `gt`, `gT` | Help, next and previous buffer (the kit binds them) |
+
+Dates are said the kit's way (`wcgw_kit::when`): `ago` in a feed's column (`5m`, `3h`, `2d`, `6w`, `1y`; ghd,
+devnull), `short` in a list of mail or chat (`14:05`, `5 Nov`, `Nov 2025`; muttrs, slackers), `long` and `day` in
+full (`Thu 5 Nov 2026, 14:05`).
 
 ### D13. Commands, registries, plugins
 
@@ -416,6 +427,16 @@ Calls made while building, and why; each can be revisited.
 - **The apps built against the kit's working tree** (path dependencies, D18) while it changed: twice an agent caught
   it mid-edit and checked against a `git archive` of the kit's HEAD instead. The kit was tested before each commit; M8's
   pinned revisions end this.
+- **One way across the apps** (a pass after the ports, comparing their keys, commands and looks): what was the same
+  everywhere went into the kit's defaults (`<F1>`, `<leader>?`, `gt`, `gT`, a double click opening) and `when`;
+  what differed took one app's way, as the table in D12 says. The calls: feeds keep ages in three cells (devnull's
+  dates after a week went), lists of mail and chat put the day first (`5 Nov`) and the month for another year, so
+  muttrs' date column is two cells wider; `:browse` alone is the thing on the web in every app, so muttrs' says a
+  Message has none; ghd's Done went to `a`, as muttrs archives on it, leaving `s` to star or flag; slackers' `o` and
+  single click no longer open; muttrs' `theme`, `icons`, `images` and `mouse` are read no more, as ghd's. Commits:
+  the kit d964a82, 166461f, 46bf749, f647dd2; devnull 1afa472, 8285b6c, 7c0b259; ghd 3c7bfdf, 74e5723, 033c800,
+  51535cc, 11e7c31, efaa01c; muttrs a9072a5, fb1db7a, 24d3c66, 6826bbd, b91a842, 25a3525, b614a9f, f6c6cc2;
+  slackers e69e1e5 (`q` left the sidebar alone), 03147d4, a51d19c, d8a8f06.
 - **Still open, from the ports**: a span carries one highlight group, so ghd lays its read/unread/selected styles
   over a View's when drawing it, and `:hi` on those shows at the next redraw; a buffer shown in two windows of
   different widths is laid out (by the application) for one of them.
