@@ -172,6 +172,23 @@ fn document<T>(keymap: &Keymap, commands: &[(&str, &str)]) -> Document<T> {
         .max()
         .unwrap_or(0)
         + 2;
+    doc.push_back("options", heading("Options, for :set"));
+    let options_width = super::options::HELP
+        .iter()
+        .map(|(name, _)| width(name))
+        .max()
+        .unwrap_or(0)
+        + 2;
+    for (name, help) in super::options::HELP {
+        doc.push_back(
+            format!("option/{name}").as_str(),
+            vec![Line::Text(vec![
+                Span::new("  ", Group::NORMAL),
+                Span::new(pad(name, options_width), Group::MARKUP_RAW),
+                Span::new((*help).to_owned(), Group::WHICH_KEY_DESC),
+            ])],
+        );
+    }
     doc.push_back("commands", heading("Commands"));
     for (name, help) in commands {
         let block = format!("command/{name}");

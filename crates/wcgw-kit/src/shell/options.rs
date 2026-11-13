@@ -111,6 +111,25 @@ const OPTIONS: &[(&str, &str, Opt)] = &[
     ("graphics", "", Opt::Graphics),
 ];
 
+/// Every option with what `:help` says of it, by its full name.
+pub(super) const HELP: &[(&str, &str)] = &[
+    ("ignorecase", "searches ignore case"),
+    ("smartcase", "unless the pattern has capitals"),
+    ("hlsearch", "show the last search's matches"),
+    ("incsearch", "show where a search goes while typed"),
+    ("scrolloff", "rows kept in view around the cursor"),
+    ("timeoutlen", "how long keys wait for more, in ms"),
+    (
+        "showtabline",
+        "the tabline: 0 never, 1 with buffers, 2 always",
+    ),
+    ("laststatus", "statuslines: 2 per window, 3 one for all"),
+    ("leader", "the key <leader> stands for"),
+    ("mouse", "the mouse is the kit's: a, or empty for none"),
+    ("icons", "icons drawn as auto, nerd or plain"),
+    ("graphics", "pictures as kitty, halfblocks or off"),
+];
+
 impl Options {
     /// Vim's E474 for `arg`.
     fn invalid(arg: &SetArg) -> String {
@@ -289,4 +308,17 @@ fn number(name: &str, value: &str) -> Result<u64, String> {
     value
         .parse()
         .map_err(|_| format!("E521: Number required after =: {name}={value}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_option_says_what_it_does() {
+        let named: Vec<&str> = OPTIONS.iter().map(|&(name, ..)| name).collect();
+        let helped: Vec<&str> = HELP.iter().map(|&(name, _)| name).collect();
+
+        assert_eq!(named, helped);
+    }
 }
