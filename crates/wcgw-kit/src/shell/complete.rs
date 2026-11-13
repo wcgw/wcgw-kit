@@ -1,5 +1,6 @@
 //! `<Tab>` on the command line: what the word before the cursor may be completed to, by what the command takes.
 
+use super::cmdline::Purpose;
 use super::commands::Found;
 use super::{Kit, Mode_, options};
 use crate::app::App;
@@ -16,12 +17,26 @@ pub struct Completions {
 }
 
 impl<A: App> Kit<A> {
-    /// `<Tab>` (`forward`) and `<S-Tab>` on the ex command line: the next or previous completion.
+    /// `<Tab>` (`forward`) and `<S-Tab>` on the ex command line or a prompt that completes: the next or previous
+    /// completion.
     pub(super) fn complete_command_line(&mut self, app: &A, forward: bool) {
         let Mode_::Cmdline(mut cmdline) = std::mem::replace(&mut self.mode, Mode_::Normal) else {
             return;
         };
-        cmdline.complete(forward, |line| self.ex_completions(app, line));
+        // Taken out while the line it completes changes, then put back.
+        let completer = match &mut cmdline.purpose {
+            Purpose::Prompt { complete, .. } => complete.take(),
+            Purpose::Ex | Purpose::Search(_) => None,
+        };
+        match &completer {
+            Some(complete) => cmdline.complete(forward, |line| {
+                completions(0, line, complete(app, self, line))
+            }),
+            None => cmdline.complete(forward, |line| self.ex_completions(app, line)),
+        }
+        if let Purpose::Prompt { complete, .. } = &mut cmdline.purpose {
+            *complete = completer;
+        }
         self.mode = Mode_::Cmdline(cmdline);
     }
 

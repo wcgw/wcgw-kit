@@ -314,6 +314,37 @@ fn a_prompt_hears_the_line_typed() {
 }
 
 #[test]
+fn a_prompt_may_complete_what_is_typed_with_tab() {
+    let mut toy = toy(40, 8);
+    toy.kit.prompt_completing(
+        "Move to: ",
+        |_, _, typed| {
+            ["Archive", "Arts", "Inbox"]
+                .into_iter()
+                .filter(|name| name.starts_with(typed))
+                .map(str::to_owned)
+                .collect()
+        },
+        |toy: &mut Toy, _, name| {
+            toy.typed.push(name);
+            Vec::new()
+        },
+    );
+
+    let _ = toy.press("Ar<Tab><Tab>");
+    assert_eq!(cmdline(&toy), "Move to: Arts");
+    let _ = toy.press("<CR>");
+
+    assert_eq!(toy.app.typed, ["Arts"]);
+    let _ = toy.press(":name<CR>A<Tab><CR>");
+    assert_eq!(
+        toy.app.typed,
+        ["Arts", "A"],
+        "a prompt without completions ignores it"
+    );
+}
+
+#[test]
 fn what_the_editor_saved_goes_to_the_application() {
     let mut toy = toy(40, 8);
 

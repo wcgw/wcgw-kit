@@ -12,6 +12,9 @@ use crate::shell::Kit;
 /// What a prompt does with the line typed.
 pub(super) type Then<A> = Box<dyn FnOnce(&mut A, &mut Kit<A>, String) -> Effects<A>>;
 
+/// What a prompt's line, up to the cursor, may be completed to.
+pub(super) type Complete<A> = Box<dyn Fn(&A, &Kit<A>, &str) -> Vec<String>>;
+
 /// What a command line is for.
 pub(super) enum Purpose<A: App> {
     /// `:`.
@@ -25,13 +28,22 @@ pub(super) enum Purpose<A: App> {
         masked: bool,
         /// What to do with it; taken once it is typed.
         then: Option<Then<A>>,
+        /// What `<Tab>` completes it to, if anything.
+        complete: Option<Complete<A>>,
     },
 }
 
 impl<A: App> Purpose<A> {
-    /// Whether it is `:`'s.
-    pub(super) fn is_ex(&self) -> bool {
-        matches!(self, Self::Ex)
+    /// Whether `<Tab>` completes it: `:`'s, and a prompt given completions.
+    pub(super) fn completes(&self) -> bool {
+        matches!(
+            self,
+            Self::Ex
+                | Self::Prompt {
+                    complete: Some(_),
+                    ..
+                }
+        )
     }
 
     fn is_masked(&self) -> bool {

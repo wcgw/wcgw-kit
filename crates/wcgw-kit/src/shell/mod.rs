@@ -774,6 +774,25 @@ impl<A: App> Kit<A> {
             prompt: prompt.into(),
             masked,
             then: Some(Box::new(then)),
+            complete: None,
+        };
+        self.mode = Mode_::Cmdline(Cmdline::new(purpose, None));
+    }
+
+    /// Asks for a line of text after `prompt`, as [`Kit::prompt`] does, which `<Tab>` completes: `complete` hears
+    /// the line up to the cursor and gives what may replace it whole (a mailbox's name, a path), those that start
+    /// with it being shown.
+    pub fn prompt_completing(
+        &mut self,
+        prompt: impl Into<String>,
+        complete: impl Fn(&A, &Kit<A>, &str) -> Vec<String> + 'static,
+        then: impl FnOnce(&mut A, &mut Kit<A>, String) -> Effects<A> + 'static,
+    ) {
+        let purpose = Purpose::Prompt {
+            prompt: prompt.into(),
+            masked: false,
+            then: Some(Box::new(then)),
+            complete: Some(Box::new(complete)),
         };
         self.mode = Mode_::Cmdline(Cmdline::new(purpose, None));
     }
@@ -950,7 +969,7 @@ impl<A: App> Kit<A> {
 
     fn key(&mut self, app: &mut A, key: Key) -> Effects<A> {
         if let Mode_::Cmdline(cmdline) = &self.mode
-            && cmdline.purpose.is_ex()
+            && cmdline.purpose.completes()
             && key.code == Code::Tab
         {
             self.complete_command_line(app, !key.mods.contains(Mods::SHIFT));
