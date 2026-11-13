@@ -11,6 +11,8 @@ mod options;
 mod picker;
 mod pictures;
 mod statusline;
+#[cfg(test)]
+mod tests;
 mod view;
 mod window;
 mod windows;

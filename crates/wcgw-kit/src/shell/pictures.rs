@@ -18,12 +18,23 @@ use crate::doc::{Layout, PictureRow};
 /// The narrowest picture that says, while it is not drawn, that it is loading or unavailable.
 const STATUS_COLS: u16 = 12;
 
+/// How much memory pictures out of view may take, in the terminal for the kitty protocol or here for half blocks,
+/// before the least recently seen go: slackers' budget.
+const BUDGET: usize = 128 << 20;
+
 /// A picture ready to draw, as the runtime prepares it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Prepared {
-    /// The escapes that send it to the terminal, to write as they are; then placeholders show it.
-    Kitty(String),
+    /// Sent with the kitty protocol: the escapes to write as they are, then placeholders show it.
+    Kitty {
+        /// The escapes.
+        escapes: String,
+        /// The file they name, to delete should they never be written.
+        staged: Option<std::path::PathBuf>,
+        /// How much memory the terminal keeps for it, for the budget.
+        bytes: usize,
+    },
     /// Its frames: one for a still picture. Those of an animation show for some time each.
     HalfBlocks(Vec<HalfBlockFrame>),
 }
@@ -41,8 +52,8 @@ struct Key {
 enum State {
     /// Asked for; with the id it will have in the terminal, for the kitty protocol.
     Loading(Option<u32>),
-    /// Sent to the terminal as image `id`.
-    Kitty(u32),
+    /// Sent to the terminal as image `id`, taking `bytes` there.
+    Kitty { id: u32, bytes: usize },
     /// Drawn with half blocks.
     HalfBlocks(Playing),
     /// It could not be had.
@@ -102,6 +113,10 @@ pub(super) struct Pictures {
     frame_wake: Option<Duration>,
     /// That wake-up's generation: those of another are stale, and none comes while there is no `frame_wake`.
     frame_generation: u64,
+    /// When each picture was last in view, counted in updates: the least recently seen go first.
+    seen: HashMap<Key, u64>,
+    /// Updates counted.
+    tick: u64,
 }
 
 impl Default for Pictures {
@@ -111,6 +126,24 @@ impl Default for Pictures {
             next_id: 1,
             frame_wake: None,
             frame_generation: 0,
+            seen: HashMap::new(),
+            tick: 0,
+        }
+    }
+}
+
+impl State {
+    /// The memory it takes, in the terminal or here.
+    fn bytes(&self) -> usize {
+        match self {
+            Self::Kitty { bytes, .. } => *bytes,
+            // A cell of half blocks is two colours.
+            Self::HalfBlocks(playing) => playing
+                .frames
+                .iter()
+                .map(|frame| frame.cells.iter().map(Vec::len).sum::<usize>() * 8)
+                .sum(),
+            Self::Loading(_) | Self::Failed => 0,
         }
     }
 }
@@ -124,13 +157,43 @@ impl Pictures {
     /// Frees what was sent to the terminal and forgets every picture: the escapes to write.
     pub(super) fn clear<M, E>(&mut self) -> Vec<Effect<M, E>> {
         self.frame_wake = None;
+        self.seen.clear();
         self.states
             .drain()
             .filter_map(|(_, state)| match state {
-                State::Kitty(id) => Some(Effect::Graphics(graphics::kitty_delete(id))),
+                State::Kitty { id, .. } => Some(Effect::Graphics(graphics::kitty_delete(id))),
                 _ => None,
             })
             .collect()
+    }
+
+    /// Notes `in_view` as seen now, then forgets the least recently seen of the others while all of them take
+    /// more than [`BUDGET`]: the escapes freeing those sent to the terminal. A picture forgotten is asked for again
+    /// once it comes back into view.
+    fn evict<M, E>(&mut self, in_view: &[Key]) -> Vec<Effect<M, E>> {
+        self.tick += 1;
+        for key in in_view {
+            self.seen.insert(key.clone(), self.tick);
+        }
+        let mut total: usize = self.states.values().map(State::bytes).sum();
+        let mut effects = Vec::new();
+        while total > BUDGET {
+            let oldest = self
+                .states
+                .iter()
+                .filter(|(key, state)| state.bytes() > 0 && !in_view.contains(key))
+                .min_by_key(|(key, _)| self.seen.get(*key).copied().unwrap_or(0))
+                .map(|(key, _)| key.clone());
+            let Some(key) = oldest else { break };
+            self.seen.remove(&key);
+            if let Some(state) = self.states.remove(&key) {
+                total -= state.bytes();
+                if let State::Kitty { id, .. } = state {
+                    effects.push(Effect::Graphics(graphics::kitty_delete(id)));
+                }
+            }
+        }
+        effects
     }
 
     /// Draws row `picture` of a picture in `area`, a row of the screen, if it is ready; otherwise says how it
@@ -149,7 +212,7 @@ impl Pictures {
         };
         let width = picture.cols.min(area.width);
         match self.states.get(&key) {
-            Some(State::Kitty(id)) => {
+            Some(State::Kitty { id, .. }) => {
                 let (r, g, b) = graphics::image_colour(*id);
                 for col in 0..width {
                     if let Some(cell) = cells.cell_mut((area.x + col, area.y)) {
@@ -216,8 +279,11 @@ impl<A: App> Kit<A> {
     /// What the pictures in view in any window need: those never asked for, asked for now; a wake-up for the next
     /// frame of an animation drawn with half blocks, unless one is to come.
     pub(super) fn pictures_in_view(&mut self) -> Effects<A> {
+        if self.options.graphics == Graphics::Off {
+            return Vec::new();
+        }
         let in_view = self.in_view();
-        let mut effects = Vec::new();
+        let mut effects = self.pictures.evict(&in_view);
         for key in &in_view {
             if self.pictures.states.contains_key(key) {
                 continue;
@@ -279,6 +345,9 @@ impl<A: App> Kit<A> {
         top: usize,
         area: Rect,
     ) {
+        if self.options.graphics == Graphics::Off {
+            return;
+        }
         for (y, row) in (area.y..area.bottom()).zip(top..layout.row_count()) {
             if let Some(picture) = layout.picture(row) {
                 let line = Rect::new(area.x, y, area.width, 1);
@@ -328,15 +397,31 @@ impl<A: App> Kit<A> {
     ) -> Effects<A> {
         let key = Key { source, cols, rows };
         let Some(State::Loading(kitty)) = self.pictures.states.get(&key) else {
+            // Not wanted as such any more: what it staged for the terminal goes.
+            if let Ok(Prepared::Kitty {
+                staged: Some(path), ..
+            }) = result
+            {
+                let _ = std::fs::remove_file(path);
+            }
             return Vec::new();
         };
         let kitty = *kitty;
         let (state, effects) = match (result, kitty) {
-            (Ok(Prepared::Kitty(sent)), Some(id)) => {
-                (State::Kitty(id), vec![Effect::Graphics(sent)])
+            (Ok(Prepared::Kitty { escapes, bytes, .. }), Some(id)) => {
+                (State::Kitty { id, bytes }, vec![Effect::Graphics(escapes)])
             }
             (Ok(Prepared::HalfBlocks(frames)), None) => {
                 (State::HalfBlocks(Playing::new(frames)), Vec::new())
+            }
+            (
+                Ok(Prepared::Kitty {
+                    staged: Some(path), ..
+                }),
+                None,
+            ) => {
+                let _ = std::fs::remove_file(path);
+                (State::Failed, Vec::new())
             }
             // Prepared for other graphics than asked for, or not at all.
             _ => (State::Failed, Vec::new()),

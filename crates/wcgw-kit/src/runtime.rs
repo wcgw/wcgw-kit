@@ -20,7 +20,7 @@ use crossterm::terminal::supports_keyboard_enhancement;
 use futures_util::StreamExt;
 use ratatui::DefaultTerminal;
 use tokio::sync::{Semaphore, mpsc};
-use wcgw_kit_gfx::{Graphics, Picture};
+use wcgw_kit_gfx::{Picture, Terminal, Transport};
 
 use crate::app::{App, Effect, Msg};
 use crate::key::Key;
@@ -84,21 +84,20 @@ const PICTURE_SLOTS: usize = 2;
 ///
 /// If the terminal cannot be set up, read from or drawn to.
 pub async fn run<A: App, P: Perform<A>>(
-    name: &str,
+    name: &'static str,
     mut app: A,
     mut kit: Kit<A>,
     mut performer: P,
     (inbox, Mailbox(mut arrived)): (Inbox<A::Msg>, Mailbox<A::Msg>),
 ) -> io::Result<()> {
     let mut terminal = Session::start()?;
-    let var = |name| std::env::var(name).ok();
-    let graphics = Graphics::guess(
-        var("TERM").as_deref(),
-        var("TERM_PROGRAM").as_deref(),
-        std::env::var_os("TMUX").is_some(),
-    );
+    let facts = Terminal::detect(|name| std::env::var(name).ok());
     // Nothing was drawn yet, so nothing to free.
-    let _ = kit.set_graphics(graphics);
+    let _ = kit.set_graphics(facts.graphics);
+    if !facts.truecolor {
+        // Before init.vim, whose :colorscheme wins (D8).
+        let _ = kit.theme_mut().colorscheme(crate::hl::ANSI_COLORSCHEME);
+    }
     kit.number_pictures_from(first_picture_id());
     measure_cells(&mut kit);
     let size = terminal.size()?;
@@ -137,7 +136,17 @@ pub async fn run<A: App, P: Perform<A>>(
         }
     }
     let slots = Arc::new(Semaphore::new(PICTURE_SLOTS));
-    let perform = |effect, performer: &mut P| perform(effect, &inbox, performer, &slots);
+    let transport = if facts.local {
+        Transport::SharedMemory(name)
+    } else {
+        Transport::InBand
+    };
+    let pictures = Pictures {
+        slots,
+        transport,
+        animates: facts.animates,
+    };
+    let perform = |effect, performer: &mut P| perform(effect, &inbox, performer, &pictures);
     for effect in kit.start(&mut app) {
         if let Step::Quit = perform(effect, &mut performer)? {
             return Ok(());
@@ -222,13 +231,20 @@ enum Step {
     Edit(String),
 }
 
+/// How pictures are got and sent: so many at once, through `transport`, run by the terminal when it `animates`.
+struct Pictures {
+    slots: Arc<Semaphore>,
+    transport: Transport,
+    animates: bool,
+}
+
 /// Carries out one effect, but for the editor, which needs the terminal. Effects that finish later send their result
 /// through `inbox`.
 fn perform<A: App, P: Perform<A>>(
     effect: Effect<A::Msg, A::Effect>,
     inbox: &Inbox<A::Msg>,
     performer: &mut P,
-    slots: &Arc<Semaphore>,
+    pictures: &Pictures,
 ) -> io::Result<Step> {
     match effect {
         Effect::Quit => return Ok(Step::Quit),
@@ -256,17 +272,18 @@ fn perform<A: App, P: Perform<A>>(
             kitty,
         } => {
             let bytes = performer.picture(&source);
-            let (inbox, slots) = (inbox.clone(), Arc::clone(slots));
+            let (inbox, slots) = (inbox.clone(), Arc::clone(&pictures.slots));
+            let (transport, animates) = (pictures.transport, pictures.animates);
             tokio::spawn(async move {
                 // Never closed: a permit always comes.
                 let _slot = slots.acquire_owned().await;
                 let result = match bytes.await {
                     // Decoding and scaling take a while: off the runtime's thread.
-                    Ok(bytes) => {
-                        tokio::task::spawn_blocking(move || prepare(&bytes, cols, rows, kitty))
-                            .await
-                            .unwrap_or_else(|_| Err("cannot prepare it".to_owned()))
-                    }
+                    Ok(bytes) => tokio::task::spawn_blocking(move || {
+                        prepare(&bytes, cols, rows, kitty, transport, animates)
+                    })
+                    .await
+                    .unwrap_or_else(|_| Err("cannot prepare it".to_owned())),
                     Err(error) => Err(error),
                 };
                 inbox.kit(Msg::Picture {
@@ -301,12 +318,26 @@ fn perform<A: App, P: Perform<A>>(
     Ok(Step::Go)
 }
 
-/// The picture in `bytes`, prepared for `cols` × `rows` cells: for the kitty protocol as image `kitty`, else as
-/// half blocks.
-fn prepare(bytes: &[u8], cols: u16, rows: u16, kitty: Option<u32>) -> Result<Prepared, String> {
+/// The picture in `bytes`, prepared for `cols` × `rows` cells: for the kitty protocol as image `kitty`, sent through
+/// `transport`, its frames when the terminal `animates`; else as half blocks.
+fn prepare(
+    bytes: &[u8],
+    cols: u16,
+    rows: u16,
+    kitty: Option<u32>,
+    transport: Transport,
+    animates: bool,
+) -> Result<Prepared, String> {
     let picture = Picture::decode(bytes).ok_or_else(|| "not a picture the kit shows".to_owned())?;
     Ok(match kitty {
-        Some(id) => Prepared::Kitty(picture.kitty(id, cols, rows)),
+        Some(id) => {
+            let sent = picture.kitty(id, cols, rows, transport, animates);
+            Prepared::Kitty {
+                escapes: sent.escapes,
+                staged: sent.staged,
+                bytes: picture.kitty_bytes(cols, rows, animates),
+            }
+        }
         None => Prepared::HalfBlocks(picture.half_blocks(cols, rows)),
     })
 }

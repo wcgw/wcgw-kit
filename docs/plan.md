@@ -332,7 +332,11 @@ Each app ends each milestone runnable, on its `wcgw-kit` branch.
 
 ### M2 `wcgw-kit-gfx`
 
-- [ ] slackers/muttrs base, native animation, detection, in-band over SSH; devnull moves to it. ⏸ try in Ghostty.
+- [x] devnull's pictures (in-band PNG, the terminal's own animation, half blocks) with slackers' findings: the
+  297-diacritic table (pictures up to 296 cells), still pictures to a local terminal as raw RGBA through `/dev/shm`,
+  deleting by id range, pictures out of view freed least recently seen first over 128 MiB. `Terminal::detect`
+  (kitty, Ghostty and its version, multiplexers, SSH, true colour, Nerd Font symbols); `:set graphics=off`.
+  Without true colour the kit starts on `default` (D8). ⏸ try in Ghostty: not done here, see M0.
 
 ### M3 slackers
 
@@ -372,9 +376,15 @@ Calls made while building, and why; each can be revisited.
 - **The picker keeps devnull's fuzzy scorer** for now; nucleo (D14) comes with slackers (M3), which uses it already.
 - **The harness has `style_at`, not `group_at` yet**: a cell holds a style, not the groups that made it. To add when a
   test needs it.
-- **No kit-own test suite for the shell yet**: devnull's 234 app tests cover it. A small one with a dummy application
-  is to come with M3, when a second application exercises the seams.
-- **devnull's graphics moved as they were** into `wcgw-kit-gfx`; M2 replaces them.
+- **No `a=q` query** (D15 asked for one): it tells whether the kitty protocol is there, not whether Unicode
+  placeholders are (WezTerm and Konsole have the protocol without them), and its answer would race the first keys
+  typed. Detection is by environment only; `:set graphics=` overrides it.
+- **Animations go in band**, as PNG frames, even to a local terminal: devnull verified them in Ghostty 1.4.0 that
+  way; frames through `/dev/shm` are untried. Still pictures use `/dev/shm` when local (slackers' way, unverified
+  in 1.4 by this work). A terminal that doesn't animate (Ghostty before 1.4) gets the first frame only, rather than
+  slackers' frame swapping.
+- **The kit has its own shell suite** now (a toy application, 16 tests), for what devnull's doesn't reach: hooks,
+  the registries, segments, searching pickers, pictures' budget and `graphics=off`.
 - **`<C-w>q`** is bound, as in Vim.
 
 ## Found in the apps while surveying (not caused by this plan)

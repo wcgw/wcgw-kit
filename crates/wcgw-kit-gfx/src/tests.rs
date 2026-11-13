@@ -111,7 +111,7 @@ fn at_its_own_size_a_picture_takes_the_cells_its_pixels_cover() {
     );
     assert_eq!(
         natural(4000, 2000, (10, 20)),
-        (96, 24),
+        (MAX_COLS, MAX_COLS / 4),
         "within the protocol's limits"
     );
     assert_eq!(natural(0, 200, (10, 20)), (0, 0));
@@ -158,7 +158,9 @@ fn half_blocks_put_the_upper_pixel_in_front_and_the_lower_behind() {
 fn the_kitty_transmission_sends_a_png_in_chunks_as_a_virtual_placement() {
     let picture = Picture::decode(&noisy_png(400, 200)).expect("picture");
 
-    let sent = picture.kitty(0x0a_0b_0c, 40, 10);
+    let sent = picture
+        .kitty(0x0a_0b_0c, 40, 10, Transport::InBand, true)
+        .escapes;
 
     let chunks: Vec<&str> = sent
         .split("\x1b\\")
@@ -186,29 +188,140 @@ fn deleting_an_image_frees_it_quietly() {
     assert_eq!(kitty_delete(7), "\x1b_Ga=d,d=I,i=7,q=2\x1b\\");
 }
 
-#[test]
-fn kitty_graphics_are_guessed_from_the_terminal_and_never_through_tmux() {
-    let guess =
-        |term: &str, program: &str, tmux: bool| Graphics::guess(Some(term), Some(program), tmux);
+/// What `Terminal::detect` makes of the environment `vars`.
+fn detect(vars: &[(&str, &str)]) -> Terminal {
+    Terminal::detect(|name| {
+        vars.iter()
+            .find(|(key, _)| *key == name)
+            .map(|(_, value)| (*value).to_owned())
+    })
+}
 
-    assert_eq!(guess("xterm-ghostty", "", false), Graphics::Kitty);
-    assert_eq!(guess("xterm-kitty", "", false), Graphics::Kitty);
-    assert_eq!(guess("xterm-256color", "ghostty", false), Graphics::Kitty);
+#[test]
+fn kitty_graphics_are_guessed_from_the_terminal_and_never_through_a_multiplexer() {
+    let graphics = |vars: &[(&str, &str)]| detect(vars).graphics;
+
+    assert_eq!(graphics(&[("TERM", "xterm-ghostty")]), Graphics::Kitty);
+    assert_eq!(graphics(&[("TERM", "xterm-kitty")]), Graphics::Kitty);
+    assert_eq!(graphics(&[("KITTY_WINDOW_ID", "1")]), Graphics::Kitty);
     assert_eq!(
-        guess("xterm-256color", "Apple_Terminal", false),
+        graphics(&[("TERM", "xterm-256color"), ("TERM_PROGRAM", "ghostty")]),
+        Graphics::Kitty
+    );
+    assert_eq!(
+        graphics(&[
+            ("TERM", "xterm-256color"),
+            ("TERM_PROGRAM", "Apple_Terminal")
+        ]),
         Graphics::HalfBlocks
     );
-    assert_eq!(
-        guess("xterm-ghostty", "", true),
-        Graphics::HalfBlocks,
-        "placeholders need passthrough there"
+    for multiplexer in ["TMUX", "ZELLIJ", "STY"] {
+        assert_eq!(
+            graphics(&[("TERM", "xterm-ghostty"), (multiplexer, "x")]),
+            Graphics::HalfBlocks,
+            "placeholders need passthrough in {multiplexer}"
+        );
+    }
+    assert_eq!(graphics(&[]), Graphics::HalfBlocks);
+}
+
+#[test]
+fn ghostty_runs_animations_from_1_4_and_kitty_always() {
+    let animates = |version: &str| {
+        detect(&[
+            ("TERM_PROGRAM", "ghostty"),
+            ("TERM_PROGRAM_VERSION", version),
+        ])
+        .animates
+    };
+
+    assert!(!animates("1.3.1"));
+    assert!(animates("1.4.0"));
+    assert!(animates("2.0.0-dev"));
+    assert!(
+        detect(&[("TERM", "xterm-ghostty")]).animates,
+        "no version said"
     );
-    assert_eq!(Graphics::guess(None, None, false), Graphics::HalfBlocks);
+    assert!(detect(&[("TERM", "xterm-kitty")]).animates);
+    assert!(!detect(&[("TERM", "xterm-256color")]).animates);
+}
+
+#[test]
+fn a_terminal_reached_over_ssh_is_not_local() {
+    assert!(detect(&[]).local);
+    for ssh in ["SSH_CONNECTION", "SSH_TTY", "SSH_CLIENT"] {
+        assert!(!detect(&[(ssh, "x")]).local, "{ssh}");
+    }
+}
+
+#[test]
+fn true_colour_and_nerd_font_symbols_are_known_of_some_terminals() {
+    let ghostty = detect(&[("TERM", "xterm-ghostty")]);
+    assert!(ghostty.truecolor && ghostty.nerd_font_symbols);
+    let wezterm = detect(&[("TERM_PROGRAM", "WezTerm")]);
+    assert!(wezterm.truecolor && wezterm.nerd_font_symbols);
+    assert!(detect(&[("COLORTERM", "truecolor")]).truecolor);
+    assert!(detect(&[("COLORTERM", "24bit")]).truecolor);
+    let plain = detect(&[("TERM", "xterm-256color")]);
+    assert!(!plain.truecolor && !plain.nerd_font_symbols);
+}
+
+#[test]
+fn deleting_a_range_of_images_names_their_ids() {
+    assert_eq!(
+        kitty_delete_range(1, 0x00ff_ffff),
+        "\x1b_Ga=d,d=R,x=1,y=16777215,q=2\x1b\\"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_still_picture_goes_to_a_local_terminal_through_a_file_it_reads() {
+    let picture = Picture::decode(&png(4, 2)).expect("picture");
+
+    let sent = picture.kitty(9, 4, 1, Transport::SharedMemory("kit-test"), true);
+
+    let Some(path) = &sent.staged else {
+        // /dev/shm can't be written here: the pixels went in the escapes instead.
+        assert!(sent.escapes.contains("f=100"));
+        return;
+    };
+    let name = path.to_string_lossy().into_owned();
+    assert!(
+        name.starts_with("/dev/shm/tty-graphics-protocol-kit-test-"),
+        "{name}"
+    );
+    let bytes = std::fs::read(path).expect("staged");
+    let _ = std::fs::remove_file(path);
+    assert_eq!(bytes.len() % 4, 0, "raw RGBA");
+    assert!(sent.escapes.contains("a=T,f=32,"), "{}", sent.escapes);
+    assert!(
+        sent.escapes.contains(",t=t,i=9,c=4,r=1,U=1,"),
+        "{}",
+        sent.escapes
+    );
+    let encoded = STANDARD.encode(name.as_bytes());
+    assert!(sent.escapes.contains(&encoded), "names the file");
+}
+
+#[test]
+fn an_animation_goes_in_band_and_stays_on_its_first_frame_where_the_terminal_does_not_animate() {
+    let picture = Picture::decode(&fixture("two-frames.png")).expect("picture");
+
+    let animated = picture.kitty(7, 4, 1, Transport::SharedMemory("kit-test"), true);
+    let still = picture.kitty(7, 4, 1, Transport::SharedMemory("kit-test"), false);
+
+    assert_eq!(animated.staged, None, "frames go in band");
+    assert!(animated.escapes.contains("a=f,"));
+    assert!(!still.escapes.contains("a=f,") && !still.escapes.contains("a=a,"));
+    if let Some(path) = still.staged {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 #[test]
 fn graphics_have_the_names_set_takes() {
-    for graphics in [Graphics::Kitty, Graphics::HalfBlocks] {
+    for graphics in Graphics::ALL {
         assert_eq!(Graphics::named(graphics.name()), Some(graphics));
     }
     assert_eq!(Graphics::named("sixel"), None);
@@ -258,7 +371,7 @@ fn sent_picture(sent: &str) -> image::DynamicImage {
 fn a_small_picture_is_sent_at_its_size_for_the_terminal_to_stretch() {
     let picture = Picture::decode(&png(4, 2)).expect("picture");
 
-    let sent = sent_picture(&picture.kitty(1, 48, 12));
+    let sent = sent_picture(&picture.kitty(1, 48, 12, Transport::InBand, true).escapes);
 
     // The box's shape (48 × 16 by 12 × 32 pixels: 2:1) around the picture's own 4 × 2.
     assert_eq!((sent.width(), sent.height()), (4, 2));
@@ -311,7 +424,7 @@ fn an_animation_too_long_or_too_large_stays_on_its_first_frame() {
 fn the_kitty_transmission_of_an_animation_sends_its_frames_then_runs_it() {
     let picture = Picture::decode(&gif(4, 2, &[(RED, 50), (BLUE, 120)])).expect("picture");
 
-    let sent = picture.kitty(7, 4, 1);
+    let sent = picture.kitty(7, 4, 1, Transport::InBand, true).escapes;
 
     let escapes: Vec<&str> = sent
         .split("\x1b\\")
@@ -348,7 +461,7 @@ fn every_chunk_of_a_frame_says_it_is_one() {
     }
     let picture = Picture::decode(&bytes).expect("picture");
 
-    let sent = picture.kitty(7, 20, 5);
+    let sent = picture.kitty(7, 20, 5, Transport::InBand, true).escapes;
 
     let start = sent.find("\x1b_Ga=f,").expect("a frame");
     let end = sent.find("\x1b_Ga=a,").expect("then the animation");
@@ -366,7 +479,10 @@ fn every_chunk_of_a_frame_says_it_is_one() {
 
 #[test]
 fn a_still_picture_is_sent_without_frames() {
-    let sent = Picture::decode(&png(4, 2)).expect("picture").kitty(7, 4, 1);
+    let sent = Picture::decode(&png(4, 2))
+        .expect("picture")
+        .kitty(7, 4, 1, Transport::InBand, true)
+        .escapes;
 
     assert!(!sent.contains("a=f") && !sent.contains("a=a"), "{sent:?}");
 }

@@ -1,0 +1,489 @@
+//! The editor around an application, through a small one: what the kit does on its own, and the seams an
+//! application plugs into (D19). devnull's suite covers the editor at length; this one keeps the kit honest alone.
+
+use std::time::Duration;
+
+use super::*;
+use crate::app::Msg;
+use crate::doc::{Line, Span};
+use crate::hl::Group;
+use crate::testing::Harness;
+
+/// What toy text refers to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Thing {
+    Page(String),
+    Link(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ToyMsg {
+    Found(String, Vec<String>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ToyEffect {
+    Search(String),
+    Load(String),
+}
+
+/// A toy application: pages by name, and what it heard.
+#[derive(Debug, Default)]
+struct Toy {
+    shown: Vec<String>,
+    opened: Vec<Thing>,
+    edited: Vec<Result<String, String>>,
+    answers: Vec<char>,
+    typed: Vec<String>,
+    unread: u64,
+}
+
+impl App for Toy {
+    type Target = Thing;
+    type Msg = ToyMsg;
+    type Effect = ToyEffect;
+
+    fn update(&mut self, kit: &mut Kit<Self>, msg: ToyMsg) -> Effects<Self> {
+        match msg {
+            ToyMsg::Found(term, names) => {
+                if let Some(picker) = kit.picker_mut() {
+                    let choices = names
+                        .into_iter()
+                        .map(|name| Choice {
+                            label: vec![(name.clone(), Group::NORMAL_FLOAT)],
+                            text: name.clone(),
+                            pick: Pick::Target(Thing::Page(name)),
+                        })
+                        .collect();
+                    picker.found(&term, choices, "nothing");
+                }
+                Vec::new()
+            }
+        }
+    }
+
+    fn open(&mut self, kit: &mut Kit<Self>, target: Thing) -> Result<Effects<Self>, String> {
+        self.opened.push(target.clone());
+        match target {
+            Thing::Page(name) => self.edit(kit, &name),
+            Thing::Link(url) => Ok(vec![Effect::OpenUrl(url)]),
+        }
+    }
+
+    fn edit(&mut self, kit: &mut Kit<Self>, name: &str) -> Result<Effects<Self>, String> {
+        if !name.starts_with("page/") {
+            return Err(format!("E94: No matching buffer for {name}"));
+        }
+        let id = kit
+            .find_buffer(name)
+            .unwrap_or_else(|| kit.add_buffer(name, page(name), true));
+        kit.show_buffer(id);
+        Ok(Vec::new())
+    }
+
+    fn edit_names(&self, _kit: &Kit<Self>) -> Vec<String> {
+        vec!["page/a".to_owned(), "page/b".to_owned()]
+    }
+
+    fn shown(&mut self, kit: &mut Kit<Self>, buffer: BufferId) -> Effects<Self> {
+        let name = kit.buffer(buffer).name().to_owned();
+        self.shown.push(name.clone());
+        vec![Effect::App(ToyEffect::Load(name))]
+    }
+
+    fn edited(&mut self, _kit: &mut Kit<Self>, saved: Result<String, String>) -> Effects<Self> {
+        self.edited.push(saved);
+        Vec::new()
+    }
+}
+
+/// A page called `name`: its name, then a line linking to another page.
+fn page(name: &str) -> Document<Thing> {
+    let mut doc = Document::new();
+    doc.push_back(
+        "head",
+        vec![
+            Line::text(name),
+            Line::Text(vec![
+                Span::new("next", Group::UNDERLINED)
+                    .with_target(Thing::Page(format!("{name}/next"))),
+                Span::new(" ", Group::NORMAL),
+                Span::new("web", Group::UNDERLINED)
+                    .with_target(Thing::Link("https://example.com".into())),
+            ]),
+        ],
+    );
+    doc
+}
+
+/// The toy on `page/home`, `width` × `height`, with its commands.
+fn toy(width: u16, height: u16) -> Harness<Toy> {
+    let mut kit = Kit::new("page/home", page("page/home"), true);
+    kit.add_command(
+        Command::new("ask", 2, |_: &mut Toy, kit, _| {
+            kit.confirm("Sure? (y/n)", None, |toy: &mut Toy, _, answer| {
+                toy.answers.push(answer);
+                Vec::new()
+            });
+            Ok(Vec::new())
+        })
+        .help("ask something"),
+    );
+    kit.add_command(
+        Command::new("name", 4, |_: &mut Toy, kit, _| {
+            kit.prompt("Name: ", false, |toy: &mut Toy, _, name| {
+                toy.typed.push(name);
+                Vec::new()
+            });
+            Ok(Vec::new())
+        })
+        .complete(|_, _, before, word| {
+            if before.is_empty() {
+                ["ada", "alan", "grace"]
+                    .into_iter()
+                    .filter(|name| name.starts_with(word))
+                    .map(str::to_owned)
+                    .collect()
+            } else {
+                Vec::new()
+            }
+        }),
+    );
+    kit.add_command(Command::new("compose", 4, |_: &mut Toy, _, line| {
+        Ok(vec![Effect::Edit {
+            text: line.args.to_owned(),
+        }])
+    }));
+    kit.add_command(
+        Command::new("forced", 3, |_: &mut Toy, kit, line| {
+            kit.info(format!("forced {}", line.bang));
+            Ok(Vec::new())
+        })
+        .bang(),
+    );
+    kit.add_picker("people", |_, _| {
+        Picker::search("People", "Type a name", |_, _, term| {
+            vec![Effect::App(ToyEffect::Search(term))]
+        })
+    });
+    kit.add_segment(Segment::new(Side::Right, 1, |toy: &Toy, _| {
+        (toy.unread > 0).then(|| format!("{} unread", toy.unread))
+    }));
+    kit.add_segment(Segment::new(Side::Right, 0, |_: &Toy, _| {
+        Some("@me".to_owned())
+    }));
+    Harness::new(Toy::default(), kit, width, height)
+}
+
+fn cmdline(toy: &Harness<Toy>) -> String {
+    toy.screen().rows.last().cloned().unwrap_or_default()
+}
+
+fn statusline(toy: &Harness<Toy>) -> String {
+    let rows = toy.screen().rows;
+    rows[rows.len() - 2].clone()
+}
+
+#[test]
+fn one_listed_buffer_shows_no_tabline_and_one_statusline_for_all() {
+    let toy = toy(40, 8);
+
+    let rows = toy.screen().rows;
+    assert_eq!(
+        rows[0], "page/home",
+        "the text from the top row: no tabline"
+    );
+    assert!(rows[6].starts_with(" NORMAL  page/home"), "{rows:#?}");
+    assert_eq!(rows[7], "");
+}
+
+#[test]
+fn a_second_listed_buffer_brings_the_tabline() {
+    let mut toy = toy(40, 8);
+
+    let _ = toy.press("j0<CR>");
+
+    let rows = toy.screen().rows;
+    assert_eq!(rows[0], " page/home  page/home/next", "{rows:#?}");
+    assert_eq!(rows[1], "page/home/next");
+}
+
+#[test]
+fn open_hands_the_target_to_the_application_and_c_t_comes_back() {
+    let mut toy = toy(40, 8);
+
+    let effects = toy.press("j0<CR>");
+
+    assert_eq!(toy.app.opened, [Thing::Page("page/home/next".into())]);
+    assert_eq!(toy.app.shown, ["page/home/next"], "the application heard");
+    assert_eq!(
+        effects,
+        [Effect::App(ToyEffect::Load("page/home/next".into()))]
+    );
+    let _ = toy.press("<C-t>");
+    assert_eq!(toy.kit.buffer(toy.kit.current_buffer()).name(), "page/home");
+    assert_eq!(
+        toy.screen().cursor,
+        (0, 2),
+        "where it left: past the tabline, row 2"
+    );
+    assert_eq!(
+        toy.press("w<CR>"),
+        [Effect::OpenUrl("https://example.com".into())]
+    );
+}
+
+#[test]
+fn edit_asks_the_application_for_names_no_buffer_has() {
+    let mut toy = toy(40, 8);
+
+    let _ = toy.press(":e page/x<CR>");
+    assert_eq!(toy.kit.buffer(toy.kit.current_buffer()).name(), "page/x");
+    let _ = toy.press(":e nope<CR>");
+    assert_eq!(cmdline(&toy), "E94: No matching buffer for nope");
+}
+
+#[test]
+fn commands_are_found_by_abbreviation_and_refuse_a_bang_they_do_not_take() {
+    let mut toy = toy(60, 8);
+
+    let _ = toy.press(":for!<CR>");
+    assert_eq!(cmdline(&toy), "forced true");
+    let _ = toy.press(":as!<CR>");
+    assert_eq!(cmdline(&toy), "E477: No ! allowed");
+    let _ = toy.press(":a<CR>");
+    assert_eq!(cmdline(&toy), "E492: Not an editor command: a");
+}
+
+#[test]
+#[should_panic(expected = ":edit is the kit's")]
+fn an_application_cannot_take_a_name_of_the_kit_s() {
+    let mut kit: Kit<Toy> = Kit::new("x", Document::new(), true);
+    kit.add_command(Command::new("edit", 1, |_, _, _| Ok(Vec::new())));
+}
+
+#[test]
+fn tab_completes_the_application_s_commands_and_their_arguments() {
+    let toy = toy(60, 8);
+
+    let names = toy.kit.ex_completions(&toy.app, "nam");
+    assert_eq!(names.candidates, ["name"]);
+    let arguments = toy.kit.ex_completions(&toy.app, "name a");
+    assert_eq!(arguments.candidates, ["ada", "alan"]);
+    assert_eq!(arguments.start, 5);
+    let edits = toy.kit.ex_completions(&toy.app, "e page/");
+    assert_eq!(edits.candidates, ["page/a", "page/b", "page/home"]);
+    let pickers = toy.kit.ex_completions(&toy.app, "pick ");
+    assert_eq!(pickers.candidates, ["buffers", "people"]);
+}
+
+#[test]
+fn a_confirmation_hears_the_next_key() {
+    let mut toy = toy(40, 8);
+
+    let _ = toy.press(":ask<CR>");
+    assert_eq!(cmdline(&toy), "Sure? (y/n)");
+    let _ = toy.press("y");
+    let _ = toy.press(":ask<CR><Esc>");
+
+    assert_eq!(toy.app.answers, ['y', '\0']);
+}
+
+#[test]
+fn a_prompt_hears_the_line_typed() {
+    let mut toy = toy(40, 8);
+
+    let _ = toy.press(":name<CR>Ada<CR>");
+
+    assert_eq!(toy.app.typed, ["Ada"]);
+}
+
+#[test]
+fn what_the_editor_saved_goes_to_the_application() {
+    let mut toy = toy(40, 8);
+
+    assert_eq!(
+        toy.press(":comp draft<CR>"),
+        [Effect::Edit {
+            text: "draft".into()
+        }]
+    );
+    let _ = toy.update(Msg::Edited(Ok("saved".into())));
+
+    assert_eq!(toy.app.edited, [Ok("saved".to_owned())]);
+}
+
+#[test]
+fn a_searching_picker_asks_once_typing_pauses_and_lists_what_comes_back() {
+    let mut toy = toy(60, 16);
+
+    let _ = toy.press(":pick people<CR>");
+    assert!(
+        toy.screen()
+            .rows
+            .iter()
+            .any(|row| row.contains("Type a name"))
+    );
+    let typed = toy.press("gr");
+    assert!(
+        typed.iter().all(|effect| !matches!(effect, Effect::App(_))),
+        "not yet"
+    );
+    let searched = toy.advance(Duration::from_millis(200));
+    assert_eq!(searched, [Effect::App(ToyEffect::Search("gr".into()))]);
+
+    let _ = toy.send(ToyMsg::Found("gr".into(), vec!["page/grace".into()]));
+    assert!(
+        toy.screen()
+            .rows
+            .iter()
+            .any(|row| row.contains("page/grace"))
+    );
+    let _ = toy.press("<CR>");
+
+    assert_eq!(toy.app.opened, [Thing::Page("page/grace".into())]);
+    assert_eq!(
+        toy.kit.buffer(toy.kit.current_buffer()).name(),
+        "page/grace"
+    );
+}
+
+#[test]
+fn segments_of_the_lowest_priority_go_first_when_the_statusline_is_short() {
+    let mut toy = toy(60, 8);
+    toy.app.unread = 3;
+
+    assert!(
+        statusline(&toy).contains("3 unread  @me  1,1"),
+        "{}",
+        statusline(&toy)
+    );
+    // " NORMAL  page/home" and a blank take 19 cells; "3 unread  1,1  All " 19 more.
+    let _ = toy.update(Msg::Resize {
+        width: 40,
+        height: 8,
+    });
+    assert!(
+        statusline(&toy).contains("3 unread  1,1"),
+        "{}",
+        statusline(&toy)
+    );
+    let _ = toy.update(Msg::Resize {
+        width: 30,
+        height: 8,
+    });
+    assert!(!statusline(&toy).contains("unread"), "{}", statusline(&toy));
+}
+
+#[test]
+fn help_lists_the_application_s_commands_with_the_kit_s() {
+    let mut toy = toy(60, 40);
+
+    let _ = toy.press(":help<CR>G");
+
+    let rows = toy.screen().rows;
+    assert!(
+        rows.iter()
+            .any(|row| row.contains(":ask") && row.contains("ask something")),
+        "{rows:#?}"
+    );
+}
+
+/// A buffer with a picture of `cols` × `rows` cells from `source` on its first line.
+fn pictured(toy: &mut Harness<Toy>, source: &str, cols: u16, rows: u16) {
+    let mut doc = Document::new();
+    doc.push_back(
+        "picture",
+        vec![Line::Image {
+            rows,
+            cols,
+            source: source.to_owned(),
+        }],
+    );
+    *toy.kit.current_doc_mut() = doc;
+}
+
+#[test]
+fn with_graphics_off_pictures_are_neither_asked_for_nor_drawn() {
+    let mut toy = toy(40, 8);
+    let _ = toy.kit.set_graphics(Graphics::HalfBlocks);
+    pictured(&mut toy, "a.png", 20, 2);
+
+    assert!(
+        toy.press("j")
+            .iter()
+            .any(|effect| matches!(effect, Effect::Picture { .. }))
+    );
+    let _ = toy.press(":set graphics=off<CR>");
+    let effects = toy.press("k");
+
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Picture { .. }))
+    );
+    assert!(
+        !toy.screen().rows[0].contains("loading"),
+        "{:?}",
+        toy.screen().rows
+    );
+}
+
+#[test]
+fn a_picture_prepared_but_no_longer_wanted_deletes_what_it_staged() {
+    let dir = tempfile::tempdir().expect("dir");
+    let staged = dir.path().join("staged.rgba");
+    std::fs::write(&staged, b"pixels").expect("write");
+    let mut toy = toy(40, 8);
+
+    let effects = toy.update(Msg::Picture {
+        source: "never-asked.png".into(),
+        cols: 4,
+        rows: 2,
+        result: Ok(Prepared::Kitty {
+            escapes: "<sent>".into(),
+            staged: Some(staged.clone()),
+            bytes: 64,
+        }),
+    });
+
+    assert!(!effects.contains(&Effect::Graphics("<sent>".into())));
+    assert!(!staged.exists());
+}
+
+#[test]
+fn pictures_out_of_view_go_once_they_take_more_than_the_budget() {
+    let mut toy = toy(40, 8);
+    let _ = toy.kit.set_graphics(Graphics::Kitty);
+    let big = 100 << 20;
+    let mut sent = Vec::new();
+    let mut arrived = Vec::new();
+    for (source, line) in [("one.png", "a"), ("two.png", "b")] {
+        pictured(&mut toy, source, 4, 2);
+        let effects = toy.press("j");
+        let kitty = effects.iter().find_map(|effect| match effect {
+            Effect::Picture { kitty, .. } => *kitty,
+            _ => None,
+        });
+        let id = kitty.expect("asked for, with an id");
+        arrived = toy.update(Msg::Picture {
+            source: source.to_owned(),
+            cols: 4,
+            rows: 2,
+            result: Ok(Prepared::Kitty {
+                escapes: format!("<{line}>"),
+                staged: None,
+                bytes: big,
+            }),
+        });
+        sent.push(id);
+    }
+
+    // Both together take 200 MiB, over the 128 MiB budget: the one out of view goes as the second arrives.
+    let effects = arrived;
+    assert!(
+        effects.contains(&Effect::Graphics(wcgw_kit_gfx::kitty_delete(sent[0]))),
+        "{effects:?}"
+    );
+    assert!(!effects.contains(&Effect::Graphics(wcgw_kit_gfx::kitty_delete(sent[1]))));
+}
