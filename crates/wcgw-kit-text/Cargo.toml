@@ -1,0 +1,21 @@
+[package]
+name = "wcgw-kit-text"
+description = "Rich text (HTML, Markdown, plain) laid out as styled terminal lines, and as wcgw-kit documents"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+base64.workspace = true
+ego-tree.workspace = true
+pulldown-cmark.workspace = true
+ratatui-core.workspace = true
+scraper.workspace = true
+unicode-segmentation.workspace = true
+unicode-width.workspace = true
+wcgw-kit.workspace = true

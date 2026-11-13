@@ -23,6 +23,10 @@ module_name_repetitions = "allow"
 doc_markdown = "allow"
 
 [workspace.dependencies]
+ego-tree = "0.11.1"
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+ratatui-core = "0.1.2"
+scraper = "0.29.0"
 futures-util = { version = "0.3", default-features = false }
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "macros", "time", "sync", "fs"] }
@@ -36,4 +40,5 @@ regex = "1"
 unicode-segmentation = "1"
 unicode-width = { version = "0.2", default-features = false }
 
+wcgw-kit = { path = "crates/wcgw-kit" }
 wcgw-kit-gfx = { path = "crates/wcgw-kit-gfx" }

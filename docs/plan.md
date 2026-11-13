@@ -347,7 +347,9 @@ Each app ends each milestone runnable, on its `wcgw-kit` branch.
 
 ### M4 `wcgw-kit-text`
 
-- [ ] Blocks and the HTML front end from muttrs-render; the Markdown front end; ghd's syntax classes.
+- [x] muttrs-render, moved as it was (its blocks, HTML with a CSS subset, plain text with quotes and format=flowed,
+  tables, contrast-safe authors' colours), with `Document::markdown` and a `kit` module: styles from the theme's
+  groups, and a rendering as a kit document. ghd's syntax classes wait for ghd (M7).
 
 ### M5 voight's `Assessor`
 
@@ -392,6 +394,14 @@ Calls made while building, and why; each can be revisited.
   in by the application, as devnull's logs are.
 - **Following the end**: a window follows a buffer's end only when what changed came from elsewhere than a key, and
   only if its cursor was on the last row after the previous update; a key moving up stops it, `G` resumes it.
+- **Rich text is laid out by the text crate, not the kit's wrapping**: muttrs' renderer draws quote bars and table
+  borders on every row a paragraph wraps to, which the kit's document can't do; a rendering's lines become a
+  document laid out for its window's width, made again when the width changes. Its colours (theme's and authors')
+  go on spans as colours of their own (`Span::with_style`), so the theme's groups still decide them through
+  `kit::styles`. Spans don't carry link targets yet: links are numbered, as muttrs has them.
+- **Markdown goes through HTML** (pulldown-cmark's), rather than a reader of its own: one layout for both.
+- **The mail-only parts stay in the text crate for now** (plain text's quotes, format=flowed and signatures): they
+  read any plain text well enough, and muttrs is their only user. D16 put them in the application.
 - **The composer's completion** gives the application the word before the cursor; the application decides what it
   is (an @-mention, an emoji, a slash command), returns suggestions, and hears which was chosen, to keep what it
   means (slackers' picked references stay slackers').
