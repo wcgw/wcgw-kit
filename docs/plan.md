@@ -343,9 +343,10 @@ Each app ends each milestone runnable, on its `wcgw-kit` branch.
 - [x] **M3.1** In the kit, each tested through the toy application: the composer (D4), the mouse (D5), windows of
   a size and placements (D11), winbars (D10), buffers that follow their end (D3), icons (D9), OSC 777
   notifications, nucleo in pickers (D14).
-- [x] **M3.2** slackers on the kit (3948e60 the port; f871cfc, 884ec98, f23d057 taking what the kit grew from it):
+- [x] **M3.2** slackers on the kit (3948e60 the port; f871cfc, 884ec98, f23d057, 7eb00f9 taking what the kit grew from it):
   the composer with its hooks (`<Up>` edits the last Message, `<Esc>` gives an edit up), first unread on open,
-  cursorline per Message, folds on section headers, `:qa` waiting for what is on its way to Slack. Behaviour changes
+  cursorline per Message, folds on section headers, `:qa` waiting for what is on its way to Slack, Workspaces'
+  icons in winbars again, the details card entered with `K` twice. Behaviour changes
   it chose: reopening a Conversation marked unread no longer reads it at once; the sidebar suggests the first unread
   row until a key; Workspaces in the statusline are grouped by how they stand. ⏸ Relicensing the code that moved
   from slackers (GPL-3.0-or-later) into the kit (Apache-2.0): the author's to confirm (see D18).
@@ -368,15 +369,17 @@ Each app ends each milestone runnable, on its `wcgw-kit` branch.
 
 - [x] Each with its `voight.rs` on voight's `Assessor`, its TOML themes and keys converted to `init.vim`, and its keys
   moved to D12.
-  - **muttrs** (a0a9bdc the port; d14e479, 3c9c076, 04f0667, d9a773a after): cursors placed by the kit in place of
+  - **muttrs** (a0a9bdc the port; d14e479, 3c9c076, 04f0667, d9a773a, 21d7572, 75456b3 after): cursors placed by the kit in place of
     reopening windows, `'cursorline'`, widths per window (`:vsplit` works), picker verbs for Links, Attachments and
-    Labels, `:qa` waiting for Tasks, `prompt_completing` for To: and Attach:, Links found by the text crate. Commands
+    Labels, `:qa` waiting for Tasks, `prompt_completing` for To: and Attach:, Links found by the text crate before
+    the Heatmap shades them, `!` and `|` with the terminal (`Effect::Shell`, piping bytes), Drafts as `.eml` in
+    the configured `editor` again. Commands
     renamed to letters only (`:notjunk`, `:delmailbox`). History is the kit's, in the same file; `!` lines are no
     longer kept.
-  - **ghd** (e81eace the port; a724508, fe49795 after): `CursorLine::Item` in place of drawing the cursor row,
+  - **ghd** (e81eace the port; a724508, fe49795, 60a0980 after): `CursorLine::Item` in place of drawing the cursor row,
     widths per window, one buffer each for the Preview, files list and file, every View's cursor restored from the
     cache, counts in the tabs (`Inbox (3)`), code coloured through `highlight_code` (a wide line is cut, still
-    coloured). Waits for GitHub in `main` after `run_returning` rather than through `App::quit`.
+    coloured), Links through `linked_lines`, shaded after. Waits for GitHub in `main` after `run_returning` rather than through `App::quit`.
 
 ### M8 Publishing
 
