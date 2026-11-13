@@ -40,11 +40,7 @@ impl<A: App> Kit<A> {
             self.buffers[index].doc = doc;
             BufferId(index)
         } else {
-            self.buffers.push(Buffer {
-                name: NAME.to_owned(),
-                doc,
-                listed: false,
-            });
+            self.buffers.push(Buffer::new(NAME.to_owned(), doc, false));
             BufferId(self.buffers.len() - 1)
         };
         if !self.windows.go_to_buffer(index) {

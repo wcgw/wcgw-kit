@@ -495,19 +495,73 @@ impl<A: App> Kit<A> {
     }
 
     /// Draws `picker` in the middle of the screen, and returns where the cursor goes: in its query.
-    pub(super) fn render_picker(&self, frame: &mut Frame<'_>, picker: &Picker<A>) -> Position {
+    /// Where `picker` goes: its card, in the middle of the screen.
+    fn picker_area(&self, picker: &Picker<A>) -> Rect {
         let (width, height) = self.size;
         let card_width = MAX_WIDTH.min(width.saturating_sub(4)).max(10).min(width);
         let rows = u16::try_from(picker.shown.len())
             .unwrap_or(u16::MAX)
             .clamp(1, MAX_ROWS);
         let card_height = (rows + 3).min(height.saturating_sub(2)).max(3).min(height);
-        let area = Rect::new(
+        Rect::new(
             (width - card_width) / 2,
             height.saturating_sub(card_height) / 3,
             card_width,
             card_height,
+        )
+    }
+
+    /// The rows of `picker`'s list on screen, and the index into what it shows of the first.
+    fn picker_list(&self, picker: &Picker<A>) -> (Rect, usize) {
+        let inner = Block::bordered().inner(self.picker_area(picker));
+        let list = Rect::new(
+            inner.x,
+            inner.y + 1,
+            inner.width,
+            inner.height.saturating_sub(1),
         );
+        let visible = usize::from(list.height);
+        // Scrolled so the chosen one is in view.
+        (
+            list,
+            picker.selected.saturating_sub(visible.saturating_sub(1)),
+        )
+    }
+
+    /// A click on the open picker: on an item of its list, chooses it, and a double click opens it.
+    pub(super) fn picker_click(
+        &mut self,
+        app: &mut A,
+        mouse: crate::key::Mouse,
+        column: u16,
+        row: u16,
+    ) -> Effects<A> {
+        let Mode_::Picker(picker) = &self.mode else {
+            return Vec::new();
+        };
+        let (list, first) = self.picker_list(picker);
+        if !list.contains((column, row).into()) {
+            return Vec::new();
+        }
+        let index = first + usize::from(row - list.y);
+        let Mode_::Picker(picker) = &mut self.mode else {
+            return Vec::new();
+        };
+        if index >= picker.shown.len() {
+            return Vec::new();
+        }
+        picker.selected = index;
+        match mouse {
+            crate::key::Mouse::DoubleLeft => {
+                let outcome = Outcome::Picked(picker.chosen());
+                self.picked(app, outcome)
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    pub(super) fn render_picker(&self, frame: &mut Frame<'_>, picker: &Picker<A>) -> Position {
+        let area = self.picker_area(picker);
         let title = format!(" {} ", picker.title);
         let block = Block::bordered()
             .title(title)
@@ -521,15 +575,8 @@ impl<A: App> Kit<A> {
             Paragraph::new(prompt),
             Rect::new(inner.x, inner.y, inner.width, 1.min(inner.height)),
         );
-        let list = Rect::new(
-            inner.x,
-            inner.y + 1,
-            inner.width,
-            inner.height.saturating_sub(1),
-        );
+        let (list, first) = self.picker_list(picker);
         let visible = usize::from(list.height);
-        // Scrolled so the chosen one is in view.
-        let first = picker.selected.saturating_sub(visible.saturating_sub(1));
         let lines: Vec<TextLine<'_>> = if picker.shown.is_empty() {
             vec![TextLine::from(vec![
                 TextSpan::raw("  "),

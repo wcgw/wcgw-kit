@@ -81,6 +81,11 @@ impl Window {
         }
     }
 
+    /// Whether it showed buffer `buffer` before, and would go back where it left it.
+    pub(super) fn has_shown(&self, buffer: BufferId) -> bool {
+        self.buffer == buffer || self.left.contains_key(&buffer)
+    }
+
     /// Shows buffer `buffer` instead, where this window last left it, or with the cursor at `start` when it never
     /// showed it. Not a jump by itself: see [`Window::record_jump`].
     pub(super) fn switch_to(&mut self, buffer: BufferId, start: Cursor) {

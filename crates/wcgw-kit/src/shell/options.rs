@@ -2,6 +2,8 @@
 
 use wcgw_kit_gfx::Graphics;
 
+use super::icons::IconSet;
+
 use crate::doc::CaseMode;
 use crate::ex::{SetArg, SetOp};
 use crate::key::{Key, parse_keys};
@@ -27,6 +29,10 @@ pub(super) struct Options {
     pub(super) showtabline: usize,
     /// Where statuslines are: 2 one per window, 3 one for all, at the bottom (D10).
     pub(super) laststatus: usize,
+    /// Whether the mouse is the kit's (D5): Neovim's `'mouse'`, which any value but none turns on.
+    pub(super) mouse: bool,
+    /// Which glyphs icons are drawn with (D9).
+    pub(super) icons: IconSet,
 }
 
 impl Default for Options {
@@ -41,6 +47,8 @@ impl Default for Options {
             incsearch: true,
             showtabline: 1,
             laststatus: 3,
+            mouse: true,
+            icons: IconSet::Auto,
         }
     }
 }
@@ -74,6 +82,10 @@ enum Opt {
     Leader,
     /// `graphics`: how pictures are drawn.
     Graphics,
+    /// `mouse`: Neovim's modes (`a`, `nvi`, …), all taken as on; empty for off.
+    Mouse,
+    /// `icons`: `auto`, `nerd` or `plain`.
+    Icons,
 }
 
 const OPTIONS: &[(&str, &str, Opt)] = &[
@@ -94,6 +106,8 @@ const OPTIONS: &[(&str, &str, Opt)] = &[
         Opt::Choice(|o| &mut o.laststatus, &[2, 3]),
     ),
     ("leader", "", Opt::Leader),
+    ("mouse", "", Opt::Mouse),
+    ("icons", "", Opt::Icons),
     ("graphics", "", Opt::Graphics),
 ];
 
@@ -117,6 +131,7 @@ impl Options {
     }
 
     /// Applies one `:set` argument. Returns what to show (for `name?`, or `name` on a non-flag), or Vim's error.
+    #[allow(clippy::too_many_lines)] // One arm per kind of option and operation.
     pub(super) fn set(
         &mut self,
         arg: &SetArg,
@@ -208,6 +223,21 @@ impl Options {
             (Opt::Leader, SetOp::Query | SetOp::On) => {
                 Ok(Some(format!("{name}={}", keymap.leader())))
             }
+            (Opt::Mouse, SetOp::Assign(value)) => {
+                self.mouse = !value.is_empty();
+                Ok(None)
+            }
+            (Opt::Mouse, SetOp::Query | SetOp::On) => Ok(Some(format!(
+                "{name}={}",
+                if self.mouse { "a" } else { "" }
+            ))),
+            (Opt::Icons, SetOp::Assign(value)) => {
+                self.icons = IconSet::named(value).ok_or_else(invalid)?;
+                Ok(None)
+            }
+            (Opt::Icons, SetOp::Query | SetOp::On) => {
+                Ok(Some(format!("{name}={}", self.icons.name())))
+            }
             (Opt::Graphics, SetOp::Assign(value)) => {
                 self.graphics = Graphics::named(value).ok_or_else(invalid)?;
                 Ok(None)
@@ -224,19 +254,23 @@ impl Options {
 /// candidates. An option's name, or for a flag `no` and its name; after `graphics=`, how pictures may be drawn.
 pub(super) fn completions(word: &str) -> (usize, Vec<String>) {
     if let Some((name, value)) = word.split_once('=') {
-        let graphics = OPTIONS.iter().any(|&(full, short, opt)| {
-            matches!(opt, Opt::Graphics) && (name == full || (!short.is_empty() && name == short))
-        });
-        let values = if graphics {
-            Graphics::ALL
+        let opt = OPTIONS
+            .iter()
+            .find(|&&(full, short, _)| name == full || (!short.is_empty() && name == short))
+            .map(|&(_, _, opt)| opt);
+        let names: Vec<&str> = match opt {
+            Some(Opt::Graphics) => Graphics::ALL
                 .iter()
                 .map(|graphics| graphics.name())
-                .filter(|candidate| candidate.starts_with(value))
-                .map(str::to_owned)
-                .collect()
-        } else {
-            Vec::new()
+                .collect(),
+            Some(Opt::Icons) => IconSet::NAMES.to_vec(),
+            _ => Vec::new(),
         };
+        let values = names
+            .into_iter()
+            .filter(|candidate| candidate.starts_with(value))
+            .map(str::to_owned)
+            .collect();
         return (name.chars().count() + 1, values);
     }
     let names = OPTIONS.iter().map(|&(full, _, _)| full.to_owned());

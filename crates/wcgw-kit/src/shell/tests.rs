@@ -631,3 +631,179 @@ fn pasting_in_insert_mode_inserts_and_startinsert_needs_a_composer() {
     let _ = plain.press(":startinsert<CR>");
     assert_eq!(cmdline(&plain), "Nothing to write in here");
 }
+
+#[test]
+fn a_sidebar_keeps_its_width_and_a_split_takes_its_share() {
+    let mut toy = toy(60, 10);
+    let main = toy.kit.current_window();
+    let side = toy.kit.add_buffer("side", page("side"), false);
+    let thread = toy.kit.add_buffer("thread", page("thread"), true);
+
+    let sidebar = toy
+        .kit
+        .open_window(Placement::FarLeft, Size::Cells(12), side);
+    assert_eq!(toy.kit.current_window(), sidebar);
+    toy.kit.focus_window(main);
+    let beside = toy
+        .kit
+        .open_window(Placement::Right, Size::Percent(50), thread);
+
+    let rows = toy.screen().rows;
+    // 60 columns: 12 for the sidebar and a separator, then 47 shared, half of them the thread's.
+    assert_eq!(rows[1].find('│'), Some(12), "{rows:#?}");
+    assert!(rows[1].starts_with("side"), "{rows:#?}");
+    assert!(rows[1].contains("page/home"), "{rows:#?}");
+    assert!(
+        rows[1].ends_with("thread") || rows[1].contains("│thread"),
+        "{rows:#?}"
+    );
+    assert_eq!(toy.kit.window_buffer(beside), Some(thread));
+    assert_eq!(toy.kit.windows_showing(side), [sidebar]);
+    assert_eq!(toy.kit.window_ids(), [sidebar, main, beside]);
+    assert!(toy.kit.close_window_id(beside));
+    assert_eq!(toy.kit.window_ids(), [sidebar, main]);
+}
+
+#[test]
+fn a_winbar_takes_the_first_row_of_the_windows_showing_its_buffer() {
+    let mut toy = toy(40, 8);
+    let id = toy.kit.current_buffer();
+
+    toy.kit
+        .buffer_mut(id)
+        .set_winbar(Some(vec![(" Home ".to_owned(), Group::TITLE)]));
+
+    let screen = toy.screen();
+    assert_eq!(screen.rows[0], " Home", "{:#?}", screen.rows);
+    assert_eq!(screen.rows[1], "page/home");
+    assert_eq!(screen.cursor, (0, 1));
+}
+
+#[test]
+fn a_buffer_that_follows_its_end_starts_there_and_stays_while_the_cursor_does() {
+    let mut toy = toy(40, 8);
+    let mut doc = Document::new();
+    for n in 1..=10 {
+        doc.push_back(
+            format!("m{n}").as_str(),
+            vec![Line::text(format!("message {n}"))],
+        );
+    }
+    let chat = toy.kit.add_buffer("chat", doc, true);
+    toy.kit.buffer_mut(chat).set_follows_end(true);
+
+    toy.kit.show_buffer(chat);
+    let _ = toy.update(Msg::FocusGained);
+    assert_eq!(toy.kit.cursor_row_text(), "message 10");
+
+    toy.kit
+        .buffer_mut(chat)
+        .doc_mut()
+        .push_back("m11", vec![Line::text("message 11")]);
+    let _ = toy.update(Msg::FocusGained);
+    assert_eq!(toy.kit.cursor_row_text(), "message 11", "followed");
+
+    let _ = toy.press("k");
+    toy.kit
+        .buffer_mut(chat)
+        .doc_mut()
+        .push_back("m12", vec![Line::text("message 12")]);
+    let _ = toy.update(Msg::FocusGained);
+    assert_eq!(
+        toy.kit.cursor_row_text(),
+        "message 10",
+        "left where it was read"
+    );
+}
+
+fn mouse(toy: &mut Harness<Toy>, mouse: crate::key::Mouse, column: u16, row: u16) -> Effects<Toy> {
+    toy.update(Msg::Mouse { mouse, column, row })
+}
+
+#[test]
+fn a_click_focuses_its_window_and_puts_the_cursor_there() {
+    let mut toy = toy(60, 10);
+    let other = toy.kit.add_buffer("other", page("other"), false);
+    let main = toy.kit.current_window();
+    let side = toy
+        .kit
+        .open_window(Placement::FarLeft, Size::Cells(20), other);
+    toy.kit.focus_window(main);
+
+    let _ = mouse(&mut toy, crate::key::Mouse::Left, 7, 1);
+
+    assert_eq!(toy.kit.current_window(), side);
+    assert_eq!(toy.screen().cursor, (7, 1), "on `web`");
+    assert_eq!(
+        toy.kit.target_under_cursor(),
+        Some(Thing::Link("https://example.com".into()))
+    );
+}
+
+#[test]
+fn a_click_runs_what_leftmouse_is_mapped_to() {
+    let mut toy = toy(40, 8);
+    let _ = toy.press(":nnoremap <lt>LeftMouse> :open<lt>CR><CR>");
+
+    let effects = mouse(&mut toy, crate::key::Mouse::Left, 6, 1);
+
+    assert_eq!(effects, [Effect::OpenUrl("https://example.com".into())]);
+}
+
+#[test]
+fn the_wheel_scrolls_the_window_under_the_pointer() {
+    let mut toy = toy(40, 6);
+    let mut doc = Document::new();
+    for n in 1..=20 {
+        doc.push_back(
+            format!("l{n}").as_str(),
+            vec![Line::text(format!("line {n}"))],
+        );
+    }
+    *toy.kit.current_doc_mut() = doc;
+
+    let _ = mouse(&mut toy, crate::key::Mouse::WheelDown, 2, 2);
+
+    assert_eq!(toy.screen().rows[0], "line 4");
+    let _ = mouse(&mut toy, crate::key::Mouse::WheelUp, 2, 2);
+    assert_eq!(toy.screen().rows[0], "line 1");
+}
+
+#[test]
+fn a_click_on_the_tabline_shows_that_buffer() {
+    let mut toy = toy(60, 8);
+    let _ = toy.press(":e page/x<CR>");
+    assert_eq!(toy.screen().rows[0], " page/home  page/x");
+
+    let _ = mouse(&mut toy, crate::key::Mouse::Left, 3, 0);
+
+    assert_eq!(toy.kit.buffer(toy.kit.current_buffer()).name(), "page/home");
+}
+
+#[test]
+fn a_double_click_on_a_picker_s_item_opens_it() {
+    let mut toy = toy(60, 16);
+    let _ = toy.press(":e page/x<CR>:pick buffers<CR>");
+    let rows = toy.screen().rows;
+    let row = rows
+        .iter()
+        .position(|row| row.contains("page/x"))
+        .expect("listed");
+    let row = u16::try_from(row).expect("a row");
+
+    let _ = mouse(&mut toy, crate::key::Mouse::DoubleLeft, 30, row);
+
+    assert_eq!(toy.kit.buffer(toy.kit.current_buffer()).name(), "page/x");
+}
+
+#[test]
+fn the_mouse_is_captured_from_the_start_and_set_mouse_lets_it_go() {
+    let mut toy = toy(40, 8);
+    let Harness { app, kit, .. } = &mut toy;
+
+    assert_eq!(kit.start(app), [Effect::CaptureMouse(true)]);
+    assert_eq!(toy.press(":set mouse=<CR>"), [Effect::CaptureMouse(false)]);
+    assert_eq!(mouse(&mut toy, crate::key::Mouse::Left, 6, 1), []);
+    assert_eq!(toy.screen().cursor, (0, 0), "ignored");
+    assert_eq!(toy.press(":set mouse=a<CR>"), [Effect::CaptureMouse(true)]);
+}

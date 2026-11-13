@@ -12,8 +12,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use crossterm::clipboard::CopyToClipboard;
 use crossterm::event::{
     DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange, Event,
-    EventStream, KeyEventKind, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags,
+    EventStream, KeyEventKind, KeyboardEnhancementFlags, MouseButton, MouseEventKind,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use crossterm::terminal::supports_keyboard_enhancement;
@@ -23,7 +23,7 @@ use tokio::sync::{Semaphore, mpsc};
 use wcgw_kit_gfx::{Picture, Terminal, Transport};
 
 use crate::app::{App, Effect, Msg};
-use crate::key::Key;
+use crate::key::{Key, Mouse};
 use crate::shell::{Kit, Prepared};
 
 /// A picture's bytes, on their way.
@@ -94,6 +94,7 @@ pub async fn run<A: App, P: Perform<A>>(
     let facts = Terminal::detect(|name| std::env::var(name).ok());
     // Nothing was drawn yet, so nothing to free.
     let _ = kit.set_graphics(facts.graphics);
+    kit.set_nerd_font_symbols(facts.nerd_font_symbols);
     if !facts.truecolor {
         // Before init.vim, whose :colorscheme wins (D8).
         let _ = kit.theme_mut().colorscheme(crate::hl::ANSI_COLORSCHEME);
@@ -152,6 +153,7 @@ pub async fn run<A: App, P: Perform<A>>(
             return Ok(());
         }
     }
+    let mut clicks = Clicks::default();
     loop {
         terminal.draw(|frame| kit.render(&app, frame))?;
         // Both branches are cancel-safe: an event or message not taken now stays queued.
@@ -160,7 +162,7 @@ pub async fn run<A: App, P: Perform<A>>(
                 let Some(event) = event else {
                     return Ok(());
                 };
-                match to_msg(event?) {
+                match to_msg(event?, &mut clicks) {
                     Some(msg) => msg,
                     None => continue,
                 }
@@ -297,6 +299,12 @@ fn perform<A: App, P: Perform<A>>(
         Effect::Graphics(escapes) => {
             let mut out = stdout();
             io::Write::write_all(&mut out, escapes.as_bytes())?;
+            io::Write::flush(&mut out)?;
+        }
+        Effect::CaptureMouse(on) => capture_mouse(on)?,
+        Effect::Notify { title, body } => {
+            let mut out = stdout();
+            io::Write::write_all(&mut out, notification(&title, &body).as_bytes())?;
             io::Write::flush(&mut out)?;
         }
         Effect::OpenUrl(url) => {
@@ -460,8 +468,17 @@ pub fn config_dir(name: &str) -> Option<PathBuf> {
     config_home(env("XDG_CONFIG_HOME"), env("HOME")).map(|config| config.join(name))
 }
 
-/// The message for a terminal event, if the kit cares.
-fn to_msg<M>(event: Event) -> Option<Msg<M>> {
+/// How close in time two clicks on a cell must be to count as a double click.
+const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// The last click, to tell a double click.
+#[derive(Debug, Default)]
+struct Clicks {
+    last: Option<(std::time::Instant, u16, u16)>,
+}
+
+/// The message for a terminal event, if the kit cares; `clicks` tells double clicks.
+fn to_msg<M>(event: Event, clicks: &mut Clicks) -> Option<Msg<M>> {
     match event {
         Event::Key(key) if key.kind != KeyEventKind::Release => {
             Key::try_from(key).ok().map(Msg::Key)
@@ -470,8 +487,62 @@ fn to_msg<M>(event: Event) -> Option<Msg<M>> {
         Event::FocusGained => Some(Msg::FocusGained),
         Event::FocusLost => Some(Msg::FocusLost),
         Event::Resize(width, height) => Some(Msg::Resize { width, height }),
-        Event::Key(_) | Event::Mouse(_) => None,
+        Event::Mouse(event) => {
+            let (column, row) = (event.column, event.row);
+            let mouse = match event.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    let now = std::time::Instant::now();
+                    let double = clicks.last.is_some_and(|(at, x, y)| {
+                        (x, y) == (column, row) && now.duration_since(at) <= DOUBLE_CLICK
+                    });
+                    clicks.last = (!double).then_some((now, column, row));
+                    if double {
+                        Mouse::DoubleLeft
+                    } else {
+                        Mouse::Left
+                    }
+                }
+                MouseEventKind::Down(MouseButton::Right) => Mouse::Right,
+                MouseEventKind::Down(MouseButton::Middle) => Mouse::Middle,
+                MouseEventKind::ScrollUp => Mouse::WheelUp,
+                MouseEventKind::ScrollDown => Mouse::WheelDown,
+                _ => return None,
+            };
+            Some(Msg::Mouse { mouse, column, row })
+        }
+        Event::Key(_) => None,
     }
+}
+
+/// Whether the terminal reports the mouse, so that it stops exactly once, also from the panic hook.
+static MOUSE_CAPTURED: AtomicBool = AtomicBool::new(false);
+
+/// Has the terminal report clicks and the wheel, in SGR coordinates, or stop: buttons only, never the pointer
+/// moving, so that moving it doesn't redraw (slackers' finding).
+fn capture_mouse(on: bool) -> io::Result<()> {
+    let was = MOUSE_CAPTURED.swap(on, Ordering::SeqCst);
+    if on != was {
+        let mut out = stdout();
+        let escapes: &[u8] = if on {
+            b"\x1b[?1000h\x1b[?1006h"
+        } else {
+            b"\x1b[?1006l\x1b[?1000l"
+        };
+        io::Write::write_all(&mut out, escapes)?;
+        io::Write::flush(&mut out)?;
+    }
+    Ok(())
+}
+
+/// The OSC 777 escape that has the terminal notify `title` and `body`, without what could end it early or start
+/// another escape.
+fn notification(title: &str, body: &str) -> String {
+    let clean = |text: &str| -> String {
+        text.chars()
+            .filter(|c| !c.is_control() && *c != ';')
+            .collect()
+    };
+    format!("\x1b]777;notify;{};{}\x1b\\", clean(title), clean(body))
 }
 
 /// Whether the kitty keyboard protocol was turned on, so that it is turned off again exactly once, also from the
@@ -507,6 +578,7 @@ impl Session {
     /// Hands the terminal to the user's editor on `text` until it exits, then takes it back; what it saved, or why
     /// there is nothing.
     fn edit(&mut self, name: &str, text: &str) -> io::Result<Result<String, String>> {
+        let captured = MOUSE_CAPTURED.load(Ordering::SeqCst);
         leave_modes();
         ratatui::restore();
         let saved = run_editor(&editor(), &drafts_dir(), name, text);
@@ -517,6 +589,9 @@ impl Session {
             crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
         )?;
         enter_modes(self.keyboard)?;
+        if captured {
+            capture_mouse(true)?;
+        }
         // A blank screen, and a terminal that knows it, so the next draw paints it all. Not `Terminal::clear`: it
         // asks the terminal where the cursor is, and gives up with an error when the answer is slow.
         self.terminal = ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(stdout()))?;
@@ -541,6 +616,7 @@ fn enter_modes(keyboard: bool) -> io::Result<()> {
 /// Turns off the modes `Session::start` added on top of ratatui's. Errors are ignored: this runs while exiting or
 /// panicking, when there is nothing better to do.
 fn leave_modes() {
+    let _ = capture_mouse(false);
     let mut out = stdout();
     if KEYBOARD_ENHANCED.swap(false, Ordering::SeqCst) {
         let _ = execute!(out, PopKeyboardEnhancementFlags);
@@ -637,30 +713,81 @@ mod tests {
     #[test]
     fn presses_and_repeats_are_keys_but_releases_are_dropped() {
         assert_eq!(
-            to_msg::<()>(key(KeyEventKind::Press)),
+            to_msg::<()>(key(KeyEventKind::Press), &mut Clicks::default()),
             Some(Msg::Key(Key::char('j')))
         );
         assert_eq!(
-            to_msg::<()>(key(KeyEventKind::Repeat)),
+            to_msg::<()>(key(KeyEventKind::Repeat), &mut Clicks::default()),
             Some(Msg::Key(Key::char('j')))
         );
-        assert_eq!(to_msg::<()>(key(KeyEventKind::Release)), None);
+        assert_eq!(
+            to_msg::<()>(key(KeyEventKind::Release), &mut Clicks::default()),
+            None
+        );
     }
 
     #[test]
     fn focus_paste_and_resize_become_messages() {
-        assert_eq!(to_msg::<()>(Event::FocusLost), Some(Msg::FocusLost));
-        assert_eq!(to_msg::<()>(Event::FocusGained), Some(Msg::FocusGained));
         assert_eq!(
-            to_msg::<()>(Event::Paste("hi".into())),
+            to_msg::<()>(Event::FocusLost, &mut Clicks::default()),
+            Some(Msg::FocusLost)
+        );
+        assert_eq!(
+            to_msg::<()>(Event::FocusGained, &mut Clicks::default()),
+            Some(Msg::FocusGained)
+        );
+        assert_eq!(
+            to_msg::<()>(Event::Paste("hi".into()), &mut Clicks::default()),
             Some(Msg::Paste("hi".into()))
         );
         assert_eq!(
-            to_msg::<()>(Event::Resize(80, 24)),
+            to_msg::<()>(Event::Resize(80, 24), &mut Clicks::default()),
             Some(Msg::Resize {
                 width: 80,
                 height: 24
             })
+        );
+    }
+
+    fn click(column: u16, row: u16) -> Event {
+        Event::Mouse(crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        })
+    }
+
+    #[test]
+    fn clicks_become_mouse_keys_and_a_second_on_the_same_cell_is_a_double_click() {
+        let mut clicks = Clicks::default();
+
+        let mouse = |msg: Option<Msg<()>>| match msg {
+            Some(Msg::Mouse { mouse, .. }) => Some(mouse),
+            _ => None,
+        };
+        assert_eq!(mouse(to_msg(click(3, 4), &mut clicks)), Some(Mouse::Left));
+        assert_eq!(
+            mouse(to_msg(click(3, 4), &mut clicks)),
+            Some(Mouse::DoubleLeft)
+        );
+        assert_eq!(
+            mouse(to_msg(click(3, 4), &mut clicks)),
+            Some(Mouse::Left),
+            "a third starts over"
+        );
+        assert_eq!(
+            mouse(to_msg(click(5, 4), &mut clicks)),
+            Some(Mouse::Left),
+            "elsewhere"
+        );
+    }
+
+    #[test]
+    fn notifications_can_t_end_their_escape_early() {
+        assert_eq!(
+            notification("Ada; \x1b]evil", "hi\nthere"),
+            "\x1b]777;notify;Ada ]evil;hithere\x1b\\"
         );
     }
 

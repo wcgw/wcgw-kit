@@ -143,6 +143,15 @@ pub enum WakePurpose {
 pub enum Msg<M> {
     /// A key was pressed.
     Key(Key),
+    /// The mouse was clicked or its wheel turned (D5), over the cell at `column` and `row`.
+    Mouse {
+        /// What it did.
+        mouse: crate::key::Mouse,
+        /// The cell's column.
+        column: u16,
+        /// The cell's row.
+        row: u16,
+    },
     /// Text was pasted (bracketed paste). It never runs commands; on the command line it is inserted.
     Paste(String),
     /// The editor opened by [`Effect::Edit`] closed: what it saved, or why there is nothing.
@@ -208,6 +217,15 @@ pub enum Effect<M, E> {
     },
     /// Write these graphics protocol escapes to the terminal, as they are.
     Graphics(String),
+    /// Have the terminal report mouse clicks and the wheel (D5), or stop.
+    CaptureMouse(bool),
+    /// Show a desktop notification through the terminal (OSC 777), as when something arrives while it lacks focus.
+    Notify {
+        /// Its title.
+        title: String,
+        /// What it says.
+        body: String,
+    },
     /// Hand the terminal to the user's editor on `text`, then send [`Msg::Edited`].
     Edit {
         /// What the editor opens.

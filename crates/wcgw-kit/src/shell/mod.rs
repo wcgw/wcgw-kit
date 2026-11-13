@@ -8,6 +8,8 @@ mod composer;
 mod confirm;
 mod help;
 mod hover;
+mod icons;
+mod mouse;
 mod options;
 mod picker;
 mod pictures;
@@ -46,6 +48,7 @@ pub use statusline::{Segment, Side};
 pub use wcgw_kit_gfx::Graphics;
 use window::{Viewport, Window};
 use windows::{Axis, Toward, Windows};
+pub use windows::{Placement, Size, WindowId};
 
 /// A cell's size in pixels until the terminal says otherwise: Ghostty's, as measured in devnull's M0.1.
 const DEFAULT_CELL_SIZE: (u16, u16) = (10, 20);
@@ -59,6 +62,10 @@ pub struct Buffer<T> {
     name: String,
     doc: Document<T>,
     listed: bool,
+    /// What the winbar of windows showing it says, if it has one (D10).
+    winbar: Option<Vec<(String, crate::hl::Group)>>,
+    /// Whether windows showing it start at its end and stay there as it grows, as a chat does (D3).
+    follows_end: bool,
 }
 
 impl<T> Buffer<T> {
@@ -83,6 +90,27 @@ impl<T> Buffer<T> {
     #[must_use]
     pub fn is_listed(&self) -> bool {
         self.listed
+    }
+
+    /// Gives windows showing it a winbar saying `title`, as text in highlight groups; `None` takes it away.
+    pub fn set_winbar(&mut self, title: Option<Vec<(String, crate::hl::Group)>>) {
+        self.winbar = title;
+    }
+
+    /// Makes windows showing it start at its end and stay there as it grows, while their cursor is on its last row:
+    /// as a chat's timeline does.
+    pub fn set_follows_end(&mut self, follows: bool) {
+        self.follows_end = follows;
+    }
+
+    fn new(name: String, doc: Document<T>, listed: bool) -> Self {
+        Self {
+            name,
+            doc,
+            listed,
+            winbar: None,
+            follows_end: false,
+        }
     }
 }
 
@@ -173,6 +201,9 @@ pub struct Kit<A: App> {
     editor_ours: Option<BufferId>,
     /// The buffers' composers.
     composers: HashMap<BufferId, Composer<A>>,
+    /// The windows reading at the end of a buffer that follows it, after the last update.
+    at_end: Vec<WindowId>,
+    icons: icons::Icons,
 }
 
 impl<A: App> fmt::Debug for Kit<A> {
@@ -195,11 +226,7 @@ impl<A: App> Kit<A> {
             keymap: Keymap::new(),
             options: Options::default(),
             theme: Theme::new(),
-            buffers: vec![Buffer {
-                name: name.into(),
-                doc,
-                listed,
-            }],
+            buffers: vec![Buffer::new(name.into(), doc, listed)],
             windows: Windows::new(Window::new(BufferId(0))),
             mode: Mode_::Normal,
             message: None,
@@ -221,6 +248,8 @@ impl<A: App> Kit<A> {
             shown: Vec::new(),
             editor_ours: None,
             composers: HashMap::new(),
+            at_end: Vec::new(),
+            icons: icons::Icons::default(),
         }
     }
 
@@ -249,6 +278,22 @@ impl<A: App> Kit<A> {
     /// When the kit has a command of that name.
     pub fn add_command(&mut self, command: Command<A>) {
         self.commands.add(command);
+    }
+
+    /// Makes `name` an icon (D9), drawn as `nerd` with a Nerd Font, else as `plain` (one cell, or empty).
+    pub fn define_icon(&mut self, name: &'static str, nerd: &'static str, plain: &'static str) {
+        self.icons.define(name, nerd, plain);
+    }
+
+    /// The icon `name`, as `'icons'` says to draw it: two cells, its glyph and a space.
+    #[must_use]
+    pub fn icon(&self, name: &str) -> String {
+        self.icons.get(name, self.options.icons)
+    }
+
+    /// Tells the kit whether the terminal ships Nerd Font's symbols, for `icons=auto`.
+    pub fn set_nerd_font_symbols(&mut self, ships: bool) {
+        self.icons.nerd_font_symbols = ships;
     }
 
     /// Adds a segment of the application's to the statusline.
@@ -303,11 +348,7 @@ impl<A: App> Kit<A> {
         doc: Document<A::Target>,
         listed: bool,
     ) -> BufferId {
-        self.buffers.push(Buffer {
-            name: name.into(),
-            doc,
-            listed,
-        });
+        self.buffers.push(Buffer::new(name.into(), doc, listed));
         BufferId(self.buffers.len() - 1)
     }
 
@@ -368,9 +409,133 @@ impl<A: App> Kit<A> {
             let layout = window.layout(&self.buffers, area);
             window.record_jump(&layout, window.cursor.clone());
         }
+        let first = !window.has_shown(id);
         window.switch_to(id, start);
+        if first && self.buffers[id.0].follows_end {
+            self.cursor_to_end(self.windows.current_id());
+        }
         self.visited(id);
         self.shown.push(id);
+    }
+
+    /// Shows `id` in window `window` rather than the current one, which stays current.
+    pub fn show_buffer_in(&mut self, window: WindowId, id: BufferId) {
+        let current = self.windows.current_id();
+        if self.windows.focus_id(window) {
+            self.show_buffer(id);
+            self.windows.focus_id(current);
+        }
+    }
+
+    // --- Windows. ---
+
+    /// The window the cursor is in.
+    #[must_use]
+    pub fn current_window(&self) -> WindowId {
+        self.windows.current_id()
+    }
+
+    /// The windows, top to bottom, left to right.
+    #[must_use]
+    pub fn window_ids(&self) -> Vec<WindowId> {
+        self.windows.ids()
+    }
+
+    /// Opens a window showing `buffer` as `placement` says, `size` big, and makes it current: a sidebar is
+    /// `open_window(Placement::FarLeft, Size::Cells(30), sidebar)`.
+    pub fn open_window(&mut self, placement: Placement, size: Size, buffer: BufferId) -> WindowId {
+        let id = self
+            .windows
+            .open(placement, size, window::Window::new(buffer));
+        if self.buffers[buffer.0].follows_end {
+            self.cursor_to_end(id);
+        }
+        self.shown.push(buffer);
+        id
+    }
+
+    /// Makes `id` the current window; whether it is open.
+    pub fn focus_window(&mut self, id: WindowId) -> bool {
+        self.windows.focus_id(id)
+    }
+
+    /// Closes window `id`, unless it is the last; whether it closed.
+    pub fn close_window_id(&mut self, id: WindowId) -> bool {
+        self.windows.close_id(id)
+    }
+
+    /// The buffer window `id` shows, if it is open.
+    #[must_use]
+    pub fn window_buffer(&self, id: WindowId) -> Option<BufferId> {
+        self.windows.find(id).map(|window| window.buffer)
+    }
+
+    /// The windows showing `buffer`, in tree order.
+    #[must_use]
+    pub fn windows_showing(&self, buffer: BufferId) -> Vec<WindowId> {
+        self.windows
+            .ids()
+            .into_iter()
+            .filter(|&id| self.window_buffer(id) == Some(buffer))
+            .collect()
+    }
+
+    /// Gives window `id` `size`.
+    pub fn set_window_size(&mut self, id: WindowId, size: Size) {
+        self.windows.resize(id, size);
+    }
+
+    /// The text area of window `id`, as laid out now.
+    fn window_text_area(&self, id: WindowId) -> Option<Rect> {
+        let area = self.windows_area();
+        let rect = self
+            .windows
+            .arrange(area)
+            .windows
+            .into_iter()
+            .find(|(window, _)| *window == id)?
+            .1;
+        let buffer = self.windows.find(id)?.buffer;
+        Some(self.text_area(rect, area, buffer))
+    }
+
+    /// Puts the cursor of window `id` on the last row of its buffer.
+    fn cursor_to_end(&mut self, id: WindowId) {
+        let Some(area) = self.window_text_area(id) else {
+            return;
+        };
+        let viewport = Viewport {
+            height: usize::from(area.height),
+            scrolloff: self.options.scrolloff,
+        };
+        let buffers = &self.buffers;
+        let Some(window) = self.windows.find_mut(id) else {
+            return;
+        };
+        let layout = window.layout(buffers, area);
+        window.cursor = Cursor::at_row(&layout, layout.row_count().saturating_sub(1));
+        window.follow_cursor(&layout, viewport);
+    }
+
+    /// The windows showing a buffer that follows its end whose cursor is on its last row: those to keep there.
+    fn windows_at_end(&self) -> Vec<WindowId> {
+        self.windows
+            .ids()
+            .into_iter()
+            .filter(|&id| {
+                let Some(window) = self.windows.find(id) else {
+                    return false;
+                };
+                if !self.buffers[window.buffer.0].follows_end {
+                    return false;
+                }
+                let Some(area) = self.window_text_area(id) else {
+                    return false;
+                };
+                let layout = window.layout(&self.buffers, area);
+                window.cursor.screen(&layout).row + 1 >= layout.row_count()
+            })
+            .collect()
     }
 
     /// The first row the current window shows of `id`, when it shows it: what keeps the view in place as an
@@ -525,17 +690,30 @@ impl<A: App> Kit<A> {
 
     /// Reacts to `msg`, returning what the runtime must do.
     pub fn update(&mut self, app: &mut A, msg: Msg<A::Msg>) -> Effects<A> {
+        let keyed = matches!(msg, Msg::Key(_) | Msg::Paste(_));
+        let at_end = std::mem::take(&mut self.at_end);
         let mut effects = self.react(app, msg);
+        if !keyed {
+            // What arrived went below where the cursor was reading: it goes on reading at the end.
+            for id in at_end {
+                self.cursor_to_end(id);
+            }
+        }
         if !effects.contains(&Effect::Quit) {
             effects.extend(self.notify_shown(app));
             effects.extend(self.pictures_in_view());
         }
+        self.at_end = self.windows_at_end();
         effects
     }
 
     /// The effects to start with, once the runtime is ready.
     pub fn start(&mut self, app: &mut A) -> Effects<A> {
-        let mut effects = app.start(self);
+        let mut effects = Vec::new();
+        if self.options.mouse {
+            effects.push(Effect::CaptureMouse(true));
+        }
+        effects.extend(app.start(self));
         effects.extend(self.notify_shown(app));
         effects
     }
@@ -558,6 +736,15 @@ impl<A: App> Kit<A> {
                 self.which_key = false;
                 let mut effects = self.key(app, key);
                 effects.extend(self.wake_ups());
+                effects.extend(self.notify_shown(app));
+                effects.extend(app.keyed(self));
+                effects
+            }
+            Msg::Mouse { mouse, column, row } => {
+                self.generation += 1;
+                self.which_key = false;
+                self.message = None;
+                let mut effects = self.mouse(app, mouse, column, row);
                 effects.extend(self.notify_shown(app));
                 effects.extend(app.keyed(self));
                 effects
@@ -1192,16 +1379,21 @@ impl<A: App> Kit<A> {
                 }
             }
             Builtin::Set => {
-                let graphics = self.options.graphics;
+                let (graphics, mouse) = (self.options.graphics, self.options.mouse);
                 for arg in &ex::set_args(args) {
                     if let Some(shown) = self.options.set(arg, &mut self.keymap)? {
                         self.info(shown);
                     }
                 }
+                let mut effects = Vec::new();
+                if self.options.mouse != mouse {
+                    effects.push(Effect::CaptureMouse(self.options.mouse));
+                }
                 if self.options.graphics != graphics {
                     // Drawn otherwise now: what was sent goes, and pictures are asked for again.
-                    return Ok(self.pictures.clear());
+                    effects.extend(self.pictures.clear());
                 }
+                return Ok(effects);
             }
             Builtin::Map(modes, remap) => {
                 let (lhs, rhs) = ex::map_args(args).ok_or(ExError::ArgumentRequired)?;
@@ -1414,9 +1606,11 @@ impl<A: App> Kit<A> {
     /// the rows of the buffer's composer, when it shows.
     fn text_area(&self, rect: Rect, windows: Rect, buffer: BufferId) -> Rect {
         let bar = self.options.laststatus != 3 || rect.bottom() < windows.bottom();
+        let above = u16::from(self.buffers[buffer.0].winbar.is_some()).min(rect.height);
         let below = u16::from(bar) + self.composer_rows(buffer);
         Rect {
-            height: rect.height.saturating_sub(below),
+            y: rect.y + above,
+            height: rect.height.saturating_sub(below + above),
             ..rect
         }
     }

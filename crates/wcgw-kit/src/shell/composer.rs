@@ -249,7 +249,7 @@ fn input(key: Key) -> Input {
         Code::Tab => TextKey::Tab,
         Code::Esc => TextKey::Esc,
         Code::F(n) => TextKey::F(n),
-        Code::Insert => TextKey::Null,
+        Code::Insert | Code::Mouse(_) => TextKey::Null,
     };
     Input {
         key: key_of,

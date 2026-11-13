@@ -179,6 +179,24 @@ impl<A: App> Kit<A> {
     ) -> Position {
         let windows_area = self.windows_area();
         let area = self.text_area(rect, windows_area, window.buffer);
+        if let Some(winbar) = &self.buffers[window.buffer.0].winbar {
+            let group = if is_current {
+                Group::WIN_BAR
+            } else {
+                Group::WIN_BAR_NC
+            };
+            let base = self.theme.style(group);
+            let spans: Vec<Span<'_>> = winbar
+                .iter()
+                .map(|(text, part)| {
+                    Span::styled(text.as_str(), base.patch(self.theme.style(*part)))
+                })
+                .collect();
+            frame.render_widget(
+                Paragraph::new(Line::from(spans)).style(base),
+                Rect::new(rect.x, rect.y, rect.width, 1.min(rect.height)),
+            );
+        }
         let viewport = Viewport {
             height: usize::from(area.height),
             scrolloff: self.options.scrolloff,

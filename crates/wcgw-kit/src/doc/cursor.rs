@@ -109,6 +109,23 @@ impl Cursor {
         cursor
     }
 
+    /// A cursor on screen row `row` of `layout`, at column `col` (in cells) or as near it as the row reaches: where
+    /// a click lands.
+    #[must_use]
+    pub fn at_screen<T>(layout: &Layout<'_, T>, row: usize, col: usize) -> Self {
+        let mut cursor = Self::at_row(layout, row);
+        loop {
+            let before = cursor.screen(layout);
+            if before.col >= col {
+                return cursor;
+            }
+            cursor.apply(layout, Motion::Right, 1);
+            if cursor.screen(layout) == before {
+                return cursor;
+            }
+        }
+    }
+
     /// A cursor at the start of block `key`, which may arrive later: until it does, the cursor is at the start of the
     /// document.
     #[must_use]

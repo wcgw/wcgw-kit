@@ -8,7 +8,36 @@ use super::window::Window;
 
 /// Identifies a window for as long as it is open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct WindowId(u64);
+pub struct WindowId(u64);
+
+/// How much room a window takes in its split, across for side-by-side windows and down for stacked ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Size {
+    /// A share of what the windows of a fixed size leave, alike with the others: Vim's default.
+    #[default]
+    Shared,
+    /// So many cells, as a sidebar: Vim's `'winfixwidth'`.
+    Cells(u16),
+    /// So much of the split, in percent.
+    Percent(u16),
+}
+
+/// Where a window opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placement {
+    /// Left of the current window: `:vsplit`.
+    Left,
+    /// Right of it: `:rightbelow vsplit`.
+    Right,
+    /// Above it: `:split`.
+    Above,
+    /// Below it: `:rightbelow split`.
+    Below,
+    /// At the left of the screen, as tall as it: `:topleft vsplit`, for a sidebar.
+    FarLeft,
+    /// At the right of the screen: `:botright vsplit`.
+    FarRight,
+}
 
 /// Which way a split divides its space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +87,8 @@ pub(super) struct Separator {
 pub(super) struct Windows {
     tree: Split,
     open: HashMap<WindowId, Window>,
+    /// The windows of a size of their own.
+    sizes: HashMap<WindowId, Size>,
     current: WindowId,
     next_id: u64,
 }
@@ -69,9 +100,99 @@ impl Windows {
         Self {
             tree: Split::Leaf(id),
             open: HashMap::from([(id, window)]),
+            sizes: HashMap::new(),
             current: id,
             next_id: 1,
         }
+    }
+
+    /// Opens `window` as `placement` says, `size` big, and makes it current.
+    pub(super) fn open(&mut self, placement: Placement, size: Size, window: Window) -> WindowId {
+        let id = WindowId(self.next_id);
+        self.next_id += 1;
+        self.open.insert(id, window);
+        if size != Size::Shared {
+            self.sizes.insert(id, size);
+        }
+        match placement {
+            Placement::Left => {
+                let _ = self.tree.place(self.current, id, Axis::Columns, true);
+            }
+            Placement::Right => {
+                let _ = self.tree.place(self.current, id, Axis::Columns, false);
+            }
+            Placement::Above => {
+                let _ = self.tree.place(self.current, id, Axis::Rows, true);
+            }
+            Placement::Below => {
+                let _ = self.tree.place(self.current, id, Axis::Rows, false);
+            }
+            Placement::FarLeft | Placement::FarRight => {
+                let before = placement == Placement::FarLeft;
+                let root = std::mem::replace(&mut self.tree, Split::Leaf(id));
+                self.tree = match root {
+                    Split::Node(Axis::Columns, mut children) => {
+                        let at = if before { 0 } else { children.len() };
+                        children.insert(at, Split::Leaf(id));
+                        Split::Node(Axis::Columns, children)
+                    }
+                    other if before => Split::Node(Axis::Columns, vec![Split::Leaf(id), other]),
+                    other => Split::Node(Axis::Columns, vec![other, Split::Leaf(id)]),
+                };
+            }
+        }
+        self.current = id;
+        id
+    }
+
+    /// The window `id`, if open.
+    pub(super) fn find(&self, id: WindowId) -> Option<&Window> {
+        self.open.get(&id)
+    }
+
+    /// The window `id`, if open, to change.
+    pub(super) fn find_mut(&mut self, id: WindowId) -> Option<&mut Window> {
+        self.open.get_mut(&id)
+    }
+
+    /// Makes `id` current, if open.
+    pub(super) fn focus_id(&mut self, id: WindowId) -> bool {
+        let open = self.open.contains_key(&id);
+        if open {
+            self.current = id;
+        }
+        open
+    }
+
+    /// Closes `id`, unless it is the last window; the cursor goes as `:close` sends it when it was current.
+    pub(super) fn close_id(&mut self, id: WindowId) -> bool {
+        if !self.open.contains_key(&id) {
+            return false;
+        }
+        let current = self.current;
+        self.current = id;
+        let closed = self.close();
+        if closed && current != id {
+            self.current = current;
+        }
+        if !closed {
+            self.current = current;
+        }
+        closed
+    }
+
+    /// Gives window `id` `size`.
+    pub(super) fn resize(&mut self, id: WindowId, size: Size) {
+        if size == Size::Shared {
+            self.sizes.remove(&id);
+        } else {
+            self.sizes.insert(id, size);
+        }
+    }
+
+    /// The windows, in tree order: top to bottom, left to right.
+    pub(super) fn ids(&self) -> Vec<WindowId> {
+        self.order()
     }
 
     pub(super) fn current_id(&self) -> WindowId {
@@ -130,6 +251,7 @@ impl Windows {
         let next = if at > 0 { order[at - 1] } else { order[at + 1] };
         self.tree.remove(self.current);
         self.open.remove(&self.current);
+        self.sizes.remove(&self.current);
         self.current = next;
         true
     }
@@ -138,6 +260,7 @@ impl Windows {
     pub(super) fn only(&mut self) {
         self.tree = Split::Leaf(self.current);
         self.open.retain(|&id, _| id == self.current);
+        self.sizes.clear();
     }
 
     /// `<C-w>w` (`forward`) and `<C-w>W`: the next or previous window, wrapping around.
@@ -192,7 +315,7 @@ impl Windows {
     /// Lays the windows out in `area`, sharing space evenly; side-by-side windows lose a column to a separator.
     pub(super) fn arrange(&self, area: Rect) -> Arrangement {
         let mut arrangement = Arrangement::default();
-        arrange(&self.tree, area, &mut arrangement);
+        arrange(&self.tree, area, &self.sizes, &mut arrangement);
         arrangement
     }
 
@@ -205,6 +328,36 @@ impl Windows {
 }
 
 impl Split {
+    /// Puts `new` next to the leaf `target` along `axis`, before it or after it.
+    fn place(&mut self, target: WindowId, new: WindowId, axis: Axis, before: bool) -> bool {
+        match self {
+            Self::Leaf(id) if *id == target => {
+                let pair = if before {
+                    vec![Self::Leaf(new), Self::Leaf(target)]
+                } else {
+                    vec![Self::Leaf(target), Self::Leaf(new)]
+                };
+                *self = Self::Node(axis, pair);
+                true
+            }
+            Self::Leaf(_) => false,
+            Self::Node(node_axis, children) => {
+                let at = children
+                    .iter()
+                    .position(|child| matches!(child, Self::Leaf(id) if *id == target));
+                if let Some(at) = at
+                    && *node_axis == axis
+                {
+                    children.insert(if before { at } else { at + 1 }, Self::Leaf(new));
+                    return true;
+                }
+                children
+                    .iter_mut()
+                    .any(|child| child.place(target, new, axis, before))
+            }
+        }
+    }
+
     /// Splits the leaf `target`, putting `new` before it.
     fn split(&mut self, target: WindowId, new: WindowId, axis: Axis) -> bool {
         match self {
@@ -259,7 +412,52 @@ impl Split {
     }
 }
 
-fn arrange(split: &Split, area: Rect, out: &mut Arrangement) {
+/// The room each of `children` takes of `total` cells: windows of a size of their own first, then alike shares of
+/// what is left; the last child takes what nobody else can.
+fn shares(children: &[Split], total: u16, sizes: &HashMap<WindowId, Size>) -> Vec<u16> {
+    let size_of = |child: &Split| match child {
+        Split::Leaf(id) => sizes.get(id).copied().unwrap_or_default(),
+        Split::Node(..) => Size::Shared,
+    };
+    let mut left = total;
+    let mut room: Vec<Option<u16>> = children
+        .iter()
+        .map(|child| {
+            let fixed = match size_of(child) {
+                Size::Shared => return None,
+                Size::Cells(cells) => cells,
+                Size::Percent(percent) => {
+                    u16::try_from(u32::from(total) * u32::from(percent.min(100)) / 100)
+                        .unwrap_or(total)
+                }
+            };
+            let fixed = fixed.min(left);
+            left -= fixed;
+            Some(fixed)
+        })
+        .collect();
+    let shared =
+        u16::try_from(room.iter().filter(|room| room.is_none()).count()).unwrap_or(u16::MAX);
+    if shared == 0 {
+        // Every window has a size of its own: the last takes what is left over.
+        if let Some(Some(last)) = room.last_mut() {
+            *last += left;
+        }
+        return room.into_iter().map(Option::unwrap_or_default).collect();
+    }
+    let (base, extra) = (left / shared, left % shared);
+    let mut nth = 0;
+    room.iter_mut()
+        .map(|room| {
+            room.unwrap_or_else(|| {
+                nth += 1;
+                base + u16::from(nth <= extra)
+            })
+        })
+        .collect()
+}
+
+fn arrange(split: &Split, area: Rect, sizes: &HashMap<WindowId, Size>, out: &mut Arrangement) {
     let (axis, children) = match split {
         Split::Leaf(id) => {
             out.windows.push((*id, area));
@@ -272,15 +470,14 @@ fn arrange(split: &Split, area: Rect, out: &mut Arrangement) {
         Axis::Rows => area.height,
         Axis::Columns => area.width.saturating_sub(count - 1),
     };
-    let (base, extra) = (total / count, total % count);
+    let room = shares(children, total, sizes);
     let mut offset = 0;
-    for (i, child) in (0..count).zip(children) {
-        let size = base + u16::from(i < extra);
+    for ((i, child), size) in (0..count).zip(children).zip(room) {
         let child_area = match axis {
             Axis::Rows => Rect::new(area.x, area.y + offset, area.width, size),
             Axis::Columns => Rect::new(area.x + offset, area.y, size, area.height),
         };
-        arrange(child, child_area, out);
+        arrange(child, child_area, sizes, out);
         offset += size;
         if axis == Axis::Columns && i + 1 < count {
             // Windows are laid out top to bottom, left to right: the last one is the child's bottom right.

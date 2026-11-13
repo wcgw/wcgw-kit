@@ -53,6 +53,43 @@ pub enum Code {
     PageDown,
     /// `<F1>` to `<F12>` and beyond.
     F(u8),
+    /// A mouse button or the wheel (D5), mappable as Vim's mouse keys are.
+    Mouse(Mouse),
+}
+
+/// What the mouse did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Mouse {
+    /// `<LeftMouse>`: the left button pressed.
+    Left,
+    /// `<2-LeftMouse>`: the left button pressed twice in a row on the same cell.
+    DoubleLeft,
+    /// `<MiddleMouse>`.
+    Middle,
+    /// `<RightMouse>`.
+    Right,
+    /// `<ScrollWheelUp>`.
+    WheelUp,
+    /// `<ScrollWheelDown>`.
+    WheelDown,
+}
+
+impl Mouse {
+    const NAMED: [(&'static str, Self); 6] = [
+        ("LeftMouse", Self::Left),
+        ("2-LeftMouse", Self::DoubleLeft),
+        ("MiddleMouse", Self::Middle),
+        ("RightMouse", Self::Right),
+        ("ScrollWheelUp", Self::WheelUp),
+        ("ScrollWheelDown", Self::WheelDown),
+    ];
+
+    fn name(self) -> &'static str {
+        Self::NAMED
+            .iter()
+            .find(|(_, mouse)| *mouse == self)
+            .map_or("", |(name, _)| name)
+    }
 }
 
 /// A set of modifier keys.
@@ -141,6 +178,7 @@ impl fmt::Display for Key {
             Code::PageUp => "PageUp".to_owned(),
             Code::PageDown => "PageDown".to_owned(),
             Code::F(n) => format!("F{n}"),
+            Code::Mouse(mouse) => mouse.name().to_owned(),
         };
         f.write_str("<")?;
         for (modifier, prefix) in [(Mods::CTRL, "C-"), (Mods::ALT, "M-"), (Mods::SHIFT, "S-")] {
@@ -176,6 +214,12 @@ pub fn parse_keys(notation: &str, leader: Key) -> Vec<Key> {
 
 /// The key a `<...>` name stands for, such as `C-w`, `CR` or `leader`.
 fn named_key(name: &str, leader: Key) -> Option<Key> {
+    if let Some(&(_, mouse)) = Mouse::NAMED
+        .iter()
+        .find(|(known, _)| known.eq_ignore_ascii_case(name))
+    {
+        return Some(Key::new(Code::Mouse(mouse)));
+    }
     let mut mods = Mods::NONE;
     let mut base = name;
     while let [prefix, b'-', _, ..] = base.as_bytes() {
@@ -456,6 +500,31 @@ mod tests {
             [
                 "<C-w>", "j", "<Space>", "<lt>", "<S-Tab>", "<F2>", "<CR>", "Q", "<M-x>"
             ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod mouse_tests {
+    use super::*;
+
+    #[test]
+    fn mouse_keys_have_vim_s_names() {
+        for name in [
+            "<LeftMouse>",
+            "<2-LeftMouse>",
+            "<MiddleMouse>",
+            "<RightMouse>",
+            "<ScrollWheelUp>",
+            "<ScrollWheelDown>",
+        ] {
+            let keys = parse_keys(name, Key::char(' '));
+            assert_eq!(keys.len(), 1, "{name}");
+            assert_eq!(keys[0].to_string(), name);
+        }
+        assert_eq!(
+            parse_keys("<leftmouse>", Key::char(' ')),
+            [Key::new(Code::Mouse(Mouse::Left))]
         );
     }
 }
