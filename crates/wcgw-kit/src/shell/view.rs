@@ -358,6 +358,12 @@ impl<A: App> Kit<A> {
         let top = window.top(&layout, viewport);
         let cursor = window.cursor.screen(&layout);
         let (mode, mode_group) = self.mode_label();
+        // The mode's and the ruler's ends rounded, as lualine draws them with a Nerd Font; square without one.
+        let (open, close) = if self.icons.nerd(self.options.icons) {
+            (ROUND_RIGHT, ROUND_LEFT)
+        } else {
+            ("", "")
+        };
         let mut segments: Vec<(u8, Side, String)> = self
             .segments
             .iter()
@@ -365,11 +371,12 @@ impl<A: App> Kit<A> {
                 (segment.render)(app, self).map(|text| (segment.priority, segment.side, text))
             })
             .collect();
+        let ruler = format!("{}:{}", cursor.row + 1, cursor.col + 1);
         let status = statusline(
-            is_current.then_some(mode),
+            is_current.then_some((mode, open, close)),
             &self.buffers[window.buffer.0].name,
             &mut segments,
-            &format!("{},{}", cursor.row + 1, cursor.col + 1),
+            &ruler,
             &position(top, viewport.height, layout.row_count()),
             status_area.width,
         );
@@ -401,14 +408,41 @@ impl<A: App> Kit<A> {
             }
         }
         if is_current {
-            // " NORMAL ": the mode and the space on either side of it.
-            let label = Rect {
-                width: to_u16(mode.width() + 2).min(status_area.width),
-                ..status_area
-            };
-            frame
-                .buffer_mut()
-                .set_style(label, self.theme.style(mode_group));
+            // " NORMAL " and " 6:4 ", in the mode's colours, their round ends in them over the statusline's.
+            let mode_style = self.theme.style(mode_group);
+            let end = ratatui::style::Style::new()
+                .fg(mode_style.bg.unwrap_or_default())
+                .bg(self.theme.style(group).bg.unwrap_or_default());
+            let label = to_u16(mode.width() + 2).min(status_area.width);
+            let bubble = to_u16(ruler.width() + 2).min(status_area.width);
+            let buffer = frame.buffer_mut();
+            buffer.set_style(
+                Rect {
+                    width: label,
+                    ..status_area
+                },
+                mode_style,
+            );
+            buffer.set_style(
+                Rect {
+                    x: status_area.right().saturating_sub(bubble),
+                    width: bubble,
+                    ..status_area
+                },
+                mode_style,
+            );
+            if !open.is_empty() {
+                let opened = Rect::new(status_area.x + label, status_area.y, 1, 1);
+                let closed = Rect::new(
+                    status_area.right().saturating_sub(bubble + 1),
+                    status_area.y,
+                    1,
+                    1,
+                );
+                for cell in [opened, closed] {
+                    buffer.set_style(cell.intersection(status_area), end);
+                }
+            }
         }
     }
 
@@ -647,6 +681,10 @@ impl<A: App> Kit<A> {
     }
 }
 
+/// The round ends of the statusline's mode and ruler, as lualine's (Nerd Font's powerline extras).
+const ROUND_RIGHT: &str = "\u{e0b4}";
+const ROUND_LEFT: &str = "\u{e0b6}";
+
 /// How a window's statusline looks: whether it is the current window's.
 fn statusline_group(is_current: bool) -> Group {
     if is_current {
@@ -656,11 +694,12 @@ fn statusline_group(is_current: bool) -> Group {
     }
 }
 
-/// A statusline: the mode (on the current window only) and the buffer's name, then the application's left
-/// `segments`; on the right its right segments, the ruler and where the view is. Short of room, the segments of the
-/// lowest priority go first, then the start of the name, as Vim shortens a file name: `<` and its end.
+/// A statusline: the mode (on the current window only, with the ends that round it and the ruler off) and the
+/// buffer's name, then the application's left `segments`; on the right its right segments, where the view is and
+/// the ruler, as lualine lays them out. Short of room, the segments of the lowest priority go first, then the start
+/// of the name, as Vim shortens a file name: `<` and its end.
 fn statusline(
-    mode: Option<&str>,
+    mode: Option<(&str, &str, &str)>,
     name: &str,
     segments: &mut Vec<(u8, Side, String)>,
     ruler: &str,
@@ -668,11 +707,13 @@ fn statusline(
     width: u16,
 ) -> Line<'static> {
     let width = usize::from(width);
-    let prefix = match mode {
-        Some(mode) => format!(" {mode}  "),
-        None => " ".to_owned(),
+    let (prefix, ruler) = match mode {
+        Some((mode, open, close)) => (
+            format!(" {mode} {open} "),
+            format!("{position} {close} {ruler} "),
+        ),
+        None => (" ".to_owned(), format!("{position}  {ruler} ")),
     };
-    let ruler = format!("{ruler}  {position} ");
     let side = |segments: &[(u8, Side, String)], side: Side| -> String {
         segments.iter().filter(|(_, at, _)| *at == side).fold(
             String::new(),

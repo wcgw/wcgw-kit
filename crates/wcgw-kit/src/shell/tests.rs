@@ -209,8 +209,29 @@ fn one_listed_buffer_shows_no_tabline_and_one_statusline_for_all() {
         rows[0], "page/home",
         "the text from the top row: no tabline"
     );
-    assert!(rows[6].starts_with(" NORMAL  page/home"), "{rows:#?}");
+    assert!(
+        rows[6].starts_with(" NORMAL \u{e0b4} page/home"),
+        "{rows:#?}"
+    );
+    assert!(rows[6].ends_with("All \u{e0b6} 1:1"), "{rows:#?}");
     assert_eq!(rows[7], "");
+}
+
+#[test]
+fn the_statusline_rounds_the_mode_and_the_ruler_as_lualine_or_squares_them_without_a_nerd_font() {
+    let mut toy = toy(40, 8);
+    let mode = toy.style_at(1, 6);
+    let line = toy.style_at(20, 6);
+
+    // The round end in the mode's colour, over the statusline's.
+    let end = toy.style_at(8, 6);
+    assert_eq!((end.fg, end.bg), (mode.bg, line.bg));
+    assert_eq!(toy.style_at(38, 6).bg, mode.bg, "the ruler too");
+
+    let _ = toy.press(":set icons=plain<CR>");
+    let rows = toy.screen().rows;
+    assert!(rows[6].starts_with(" NORMAL  page/home"), "{rows:#?}");
+    assert!(rows[6].ends_with("All  1:1"), "{rows:#?}");
 }
 
 #[test]
@@ -400,7 +421,7 @@ fn leader_f_finds_buffers_help_keys_commands_and_jumps() {
     // Help opens at it.
     let _ = toy.press("<Space>fhnext buffer<CR>");
     assert!(
-        shown(&toy, "NORMAL  help") && shown(&toy, "next buffer                :bnext"),
+        shown(&toy, "NORMAL \u{e0b4} help") && shown(&toy, "next buffer                :bnext"),
         "{:#?}",
         toy.screen().rows
     );
@@ -484,17 +505,17 @@ fn segments_of_the_lowest_priority_go_first_when_the_statusline_is_short() {
     toy.app.unread = 3;
 
     assert!(
-        statusline(&toy).contains("3 unread  @me  1,1"),
+        statusline(&toy).contains("3 unread  @me  All \u{e0b6} 1:1"),
         "{}",
         statusline(&toy)
     );
-    // " NORMAL  page/home" and a blank take 19 cells; "3 unread  1,1  All " 19 more.
+    // " NORMAL  page/home" and a blank take 19 cells; "3 unread  All  1:1 " 20 more.
     let _ = toy.update(Msg::Resize {
         width: 40,
         height: 8,
     });
     assert!(
-        statusline(&toy).contains("3 unread  1,1"),
+        statusline(&toy).contains("3 unread  All \u{e0b6} 1:1"),
         "{}",
         statusline(&toy)
     );

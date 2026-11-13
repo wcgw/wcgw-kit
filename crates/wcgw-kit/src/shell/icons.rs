@@ -75,13 +75,18 @@ impl Icons {
         self.known.push((name, nerd, plain));
     }
 
-    /// The icon `name` as `set` draws it, two cells wide; blank for an icon nobody defined.
-    pub(super) fn get(&self, name: &str, set: IconSet) -> String {
-        let nerd = match set {
+    /// Whether `set` draws Nerd Font's glyphs here.
+    pub(super) fn nerd(&self, set: IconSet) -> bool {
+        match set {
             IconSet::Auto => self.nerd_font_symbols,
             IconSet::Nerd => true,
             IconSet::Plain => false,
-        };
+        }
+    }
+
+    /// The icon `name` as `set` draws it, two cells wide; blank for an icon nobody defined.
+    pub(super) fn get(&self, name: &str, set: IconSet) -> String {
+        let nerd = self.nerd(set);
         let glyph = self.known.iter().find(|(known, ..)| *known == name).map_or(
             "",
             |&(_, with_nerd, plain)| if nerd { with_nerd } else { plain },
