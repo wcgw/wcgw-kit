@@ -87,8 +87,9 @@ pub(super) struct Separator {
 pub(super) struct Windows {
     tree: Split,
     open: HashMap<WindowId, Window>,
-    /// The windows of a size of their own.
-    sizes: HashMap<WindowId, Size>,
+    /// The windows of a size of their own, along the axis it was given for: a sidebar's width stays its column's
+    /// when it is split in rows.
+    sizes: HashMap<WindowId, (Axis, Size)>,
     current: WindowId,
     next_id: u64,
 }
@@ -112,7 +113,13 @@ impl Windows {
         self.next_id += 1;
         self.open.insert(id, window);
         if size != Size::Shared {
-            self.sizes.insert(id, size);
+            let axis = match placement {
+                Placement::Above | Placement::Below => Axis::Rows,
+                Placement::Left | Placement::Right | Placement::FarLeft | Placement::FarRight => {
+                    Axis::Columns
+                }
+            };
+            self.sizes.insert(id, (axis, size));
         }
         match placement {
             Placement::Left => {
@@ -186,7 +193,13 @@ impl Windows {
         if size == Size::Shared {
             self.sizes.remove(&id);
         } else {
-            self.sizes.insert(id, size);
+            let axis = self
+                .sizes
+                .get(&id)
+                .map(|&(axis, _)| axis)
+                .or_else(|| self.tree.parent_axis(id))
+                .unwrap_or(Axis::Columns);
+            self.sizes.insert(id, (axis, size));
         }
     }
 
@@ -404,6 +417,20 @@ impl Split {
         true
     }
 
+    /// The axis of the split holding the leaf `target`, if any holds it.
+    fn parent_axis(&self, target: WindowId) -> Option<Axis> {
+        let Self::Node(axis, children) = self else {
+            return None;
+        };
+        if children
+            .iter()
+            .any(|child| matches!(child, Self::Leaf(id) if *id == target))
+        {
+            return Some(*axis);
+        }
+        children.iter().find_map(|child| child.parent_axis(target))
+    }
+
     fn leaves(&self, out: &mut Vec<WindowId>) {
         match self {
             Self::Leaf(id) => out.push(*id),
@@ -414,10 +441,20 @@ impl Split {
 
 /// The room each of `children` takes of `total` cells: windows of a size of their own first, then alike shares of
 /// what is left; the last child takes what nobody else can.
-fn shares(children: &[Split], total: u16, sizes: &HashMap<WindowId, Size>) -> Vec<u16> {
-    let size_of = |child: &Split| match child {
-        Split::Leaf(id) => sizes.get(id).copied().unwrap_or_default(),
-        Split::Node(..) => Size::Shared,
+fn shares(
+    children: &[Split],
+    total: u16,
+    axis: Axis,
+    sizes: &HashMap<WindowId, (Axis, Size)>,
+) -> Vec<u16> {
+    // A split's size along `axis` is that of a window in it sized so, as a sidebar split in rows keeps its width.
+    let size_of = |child: &Split| {
+        let mut leaves = Vec::new();
+        child.leaves(&mut leaves);
+        leaves
+            .into_iter()
+            .find_map(|id| sizes.get(&id).filter(|(along, _)| *along == axis))
+            .map_or(Size::Shared, |&(_, size)| size)
     };
     let mut left = total;
     let mut room: Vec<Option<u16>> = children
@@ -457,7 +494,12 @@ fn shares(children: &[Split], total: u16, sizes: &HashMap<WindowId, Size>) -> Ve
         .collect()
 }
 
-fn arrange(split: &Split, area: Rect, sizes: &HashMap<WindowId, Size>, out: &mut Arrangement) {
+fn arrange(
+    split: &Split,
+    area: Rect,
+    sizes: &HashMap<WindowId, (Axis, Size)>,
+    out: &mut Arrangement,
+) {
     let (axis, children) = match split {
         Split::Leaf(id) => {
             out.windows.push((*id, area));
@@ -470,7 +512,7 @@ fn arrange(split: &Split, area: Rect, sizes: &HashMap<WindowId, Size>, out: &mut
         Axis::Rows => area.height,
         Axis::Columns => area.width.saturating_sub(count - 1),
     };
-    let room = shares(children, total, sizes);
+    let room = shares(children, total, axis, sizes);
     let mut offset = 0;
     for ((i, child), size) in (0..count).zip(children).zip(room) {
         let child_area = match axis {

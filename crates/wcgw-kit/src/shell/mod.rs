@@ -704,7 +704,7 @@ impl<A: App> Kit<A> {
 
     /// Reacts to `msg`, returning what the runtime must do.
     pub fn update(&mut self, app: &mut A, msg: Msg<A::Msg>) -> Effects<A> {
-        let keyed = matches!(msg, Msg::Key(_) | Msg::Paste(_));
+        let keyed = matches!(msg, Msg::Key(_) | Msg::Paste(_) | Msg::Mouse { .. });
         let at_end = std::mem::take(&mut self.at_end);
         let mut effects = self.react(app, msg);
         if !keyed {
@@ -1355,9 +1355,12 @@ impl<A: App> Kit<A> {
         app: &mut A,
         follow: impl FnOnce(&mut A, &mut Self) -> Result<Effects<A>, String>,
     ) -> Result<Effects<A>, String> {
-        let from = self.windows.current().here();
+        // The window that followed: another may be current after, as when a sidebar opens into the main window.
+        let (window, from) = (self.windows.current_id(), self.windows.current().here());
         let outcome = follow(app, self);
-        self.windows.current_mut().push_tag(from);
+        if let Some(window) = self.windows.find_mut(window) {
+            window.push_tag(from);
+        }
         outcome
     }
 

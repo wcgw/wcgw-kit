@@ -36,6 +36,8 @@ struct Toy {
     answers: Vec<char>,
     typed: Vec<String>,
     unread: u64,
+    /// The window `:open` shows pages in, when not the current one: a main window beside a sidebar.
+    open_in: Option<WindowId>,
 }
 
 impl App for Toy {
@@ -73,6 +75,9 @@ impl App for Toy {
     fn edit(&mut self, kit: &mut Kit<Self>, name: &str) -> Result<Effects<Self>, String> {
         if !name.starts_with("page/") {
             return Err(format!("E94: No matching buffer for {name}"));
+        }
+        if let Some(window) = self.open_in {
+            kit.focus_window(window);
         }
         let id = kit
             .find_buffer(name)
@@ -829,4 +834,89 @@ fn a_span_s_own_colours_go_over_its_group_s() {
         toy.kit.style(Group::UNDERLINED).add_modifier,
         "the rest the group's"
     );
+}
+
+#[test]
+fn opening_from_a_sidebar_into_another_window_leaves_no_tag_there() {
+    let mut toy = toy(60, 10);
+    let main = toy.kit.current_window();
+    let side = toy.kit.add_buffer("side", page("page/side"), false);
+    let _ = toy
+        .kit
+        .open_window(Placement::FarLeft, Size::Cells(20), side);
+    toy.app.open_in = Some(main);
+
+    let _ = toy.press("j0<CR>");
+    assert_eq!(toy.kit.current_window(), main);
+    assert_eq!(
+        toy.kit.buffer(toy.kit.current_buffer()).name(),
+        "page/side/next"
+    );
+    let _ = toy.press("<C-t>");
+
+    assert_eq!(
+        cmdline(&toy),
+        "E73: Tag stack empty",
+        "nothing to go back to here"
+    );
+    assert_eq!(
+        toy.kit.buffer(toy.kit.current_buffer()).name(),
+        "page/side/next"
+    );
+}
+
+#[test]
+fn a_click_up_a_buffer_that_follows_its_end_stays_where_it_lands() {
+    let mut toy = toy(40, 8);
+    let mut doc = Document::new();
+    for n in 1..=4 {
+        doc.push_back(
+            format!("m{n}").as_str(),
+            vec![Line::text(format!("message {n}"))],
+        );
+    }
+    let chat = toy.kit.add_buffer("chat", doc, true);
+    toy.kit.buffer_mut(chat).set_follows_end(true);
+    toy.kit.show_buffer(chat);
+    let _ = toy.update(Msg::FocusGained);
+
+    let row = toy
+        .screen()
+        .rows
+        .iter()
+        .position(|row| row == "message 2")
+        .expect("shown");
+    let _ = mouse(
+        &mut toy,
+        crate::key::Mouse::Left,
+        1,
+        u16::try_from(row).expect("a row"),
+    );
+
+    assert_eq!(toy.kit.cursor_row_text(), "message 2");
+}
+
+#[test]
+fn a_sidebar_split_in_rows_keeps_its_width_and_its_windows_their_rows() {
+    let mut toy = toy(60, 12);
+    let side = toy.kit.add_buffer("side", page("side"), false);
+    let _ = toy
+        .kit
+        .open_window(Placement::FarLeft, Size::Cells(20), side);
+
+    let _ = toy.press(":sp<CR>");
+
+    let rows = toy.screen().rows;
+    assert_eq!(rows[0].find('│'), Some(20), "{rows:#?}");
+    assert!(
+        rows[0].starts_with("side"),
+        "the new window has rows: {rows:#?}"
+    );
+    let below = rows
+        .iter()
+        .skip(1)
+        .position(|row| row.starts_with("side"))
+        .expect("both");
+    assert!(below > 0, "{rows:#?}");
+    assert_eq!(rows[below + 1].find('│'), Some(20), "{rows:#?}");
 }
