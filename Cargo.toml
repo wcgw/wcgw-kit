@@ -1,0 +1,38 @@
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "Apache-2.0"
+publish = false
+
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+missing_docs = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Types are named after what they are in their module (`keymap::Keymap`), which reads better than avoiding it.
+module_name_repetitions = "allow"
+# Docs name terminals and protocols (Ghostty, kitty, OSC 52) more than code: backticks would make them identifiers.
+doc_markdown = "allow"
+
+[workspace.dependencies]
+base64 = "0.22"
+crossterm = { version = "0.29", default-features = false, features = ["events", "event-stream", "bracketed-paste", "osc52"] }
+futures-util = { version = "0.3", default-features = false }
+image = { version = "0.25", default-features = false, features = ["gif", "jpeg", "png", "webp"] }
+ratatui = { version = "0.30", default-features = false, features = ["crossterm", "underline-color", "layout-cache"] }
+regex = "1"
+tokio = { version = "1", features = ["rt", "macros", "time", "sync", "fs"] }
+unicode-segmentation = "1"
+unicode-width = { version = "0.2", default-features = false }
+insta = "1"
+tempfile = "3"
+
+wcgw-kit = { path = "crates/wcgw-kit" }

@@ -1,0 +1,366 @@
+# wcgw-kit: plan and decisions
+
+A Rust/ratatui toolkit giving four terminal apps one Neovim look & feel:
+[devnull](https://github.com/wcgw/devnull) (`dn`), [ghd](https://github.com/wcgw/ghd),
+[muttrs](https://github.com/wcgw/muttrs) and [slackers](https://github.com/wcgw/slackers). Extracted mostly from devnull,
+whose `docs/plan.md` (D1, D4–D7, D10) these decisions build on.
+
+## Starting point (surveyed 2026-11-12)
+
+All four on branch `wcgw-kit`, ratatui 0.30, crossterm 0.29, edition 2024, tokio. Surveyed at devnull `740b95f`, ghd
+`e92ea6b`, muttrs `9a7bbb4`, slackers `061287b`.
+
+| | Keys | `:` commands | Theme | Pictures | Icons | voight |
+| --- | --- | --- | --- | --- | --- | --- |
+| devnull | Keymap: counts, `:map`, leader, which-key | Closed enum and table, completion, history | `hl::Group`, `:hi`, `:colorscheme`, generated tokyonight ×4 | Own: PNG `a=T`, native animation, half blocks, env detection | Assumed Nerd Font, one glyph used | — |
+| ghd | No modes; `match` on keys | String `match`, wildmenu, history per run | ~70 app slots, TOML, at startup | None | Nerd or text, off by default | `assessment.rs`, label, `H` heatmap |
+| muttrs | No modes; `match`; key→keys remaps in TOML | String `match` plus a separate list, inline Tab, history on disk | ~22 slots, TOML | `muttrs-gfx`: kitty and half blocks, ported from slackers | `NERD`/`PLAIN`, `auto` | As ghd, drifted (~300 diff lines) |
+| slackers | `Mode` enum; `match`; mouse | `:q`, `:vw` | `const Style`s | `slackers-gfx`: kitty only, `/dev/shm` RGBA, frame swapping | Nerd only | — |
+
+Each app has its own `update`, `select!` loop and `$EDITOR` hand-off; all use tokyonight-moon's palette (devnull defaults
+to night) and leave the background to the terminal.
+
+## Decisions
+
+### D1. Framework for input and chrome
+
+- The kit owns input dispatch (keys → keymap → motions, actions, ex commands), the `:` line, the registries (D13) and
+  the chrome (D10, D14). Apps own their domain state and what their buffers contain; they register commands, maps,
+  highlight groups, options, icons and statusline segments.
+- Why: the feel (counts, remaps, `:map`, completion, history, which-key) is what drifted while each app hand-rolled its
+  dispatch. A toolbox of widgets would let it drift again.
+- Layered crates (D18), so leaf pieces such as pictures can be adopted on their own.
+
+### D2. The kit owns the loop
+
+- `async fn run(app)`, awaited inside the app's own tokio runtime (current-thread or multi-thread, the app's choice).
+- **Terminal session**: raw mode, alternate screen, focus reporting, bracketed paste, kitty keyboard flags, buttons-only
+  mouse (D5), panic hook, restore.
+- **Loop**: `select!` over crossterm's `EventStream`, the app's inbox and the kit's timers (key timeout, which-key,
+  half-block frames, spinner); one redraw per wake.
+- **Hand-offs**: suspending for `$EDITOR` or a shell (drop and rebuild the `EventStream`, forget pictures), OSC 52 copy,
+  OSC 777 notifications, `xdg-open`/`open`.
+- **Pictures**: prepared uploads written between draws; animation paused while unfocused.
+- **App contract**: Elm-style `update(&mut self, Msg) -> Effects`, as devnull and slackers have. Effects are the kit's
+  (`Copy`, `Edit`, `Open`, `Notify`, `Wake`, `Quit`) or the app's own. Async work posts messages back through an inbox
+  `Sender` the kit hands over.
+- Cost: ghd and muttrs mutate state and `tokio::spawn` from handlers today; they move to messages.
+
+### D3. Every pane is a buffer
+
+- devnull's document model moves into the kit. A buffer is app-rendered styled lines whose spans carry an app-defined
+  `Target` (generic: it replaces `doc::Target`/`AccountRef` and their `devnull_api` import) and mark item boundaries (a
+  commit, a notification, a Message, a mail).
+- The kit owns the cursor, every motion, `]]`/`[[` by item, `/ ? n N * #`, `v`/`V`/`y`, folds, `zz zt zb` and
+  `scrolloff`, wrapping, pictures in lines, and "an action applies to the item under the cursor".
+- No pane draws its own content. Two valves in the buffer contract instead:
+  - **Lazy lines**: a buffer can be a provider (`len()`, `lines(range, width)`), for a 50k-Message mailbox or a long
+    Slack history.
+  - **Bottom anchoring**, for chat timelines.
+- Consequences: ghd's notification table becomes column-aligned `nowrap` lines laid out for the window's width, and
+  the badges in its borders move to the statusline. muttrs' and slackers' sidebars become buffers with folds.
+  slackers' conversation (author grouping, the new-messages rule) becomes app-rendered lines.
+
+### D4. One composer
+
+- The only editable thing: a composer docked under a window.
+  - Insert mode with readline keys (`<C-w>`, `<C-u>`, arrows, Home/End), multi-line, `<CR>` sending or breaking the
+    line as configured; `<Esc>` leaves. No Vim modal editing inside: `<C-x><C-e>` hands the text to `$EDITOR`.
+  - Completion: apps register triggers (`@`, `:`, `/`) with sources, shown in the `Pmenu` the wildmenu uses.
+  - Built on ratatui-textarea, which stays out of the kit's API.
+- The `:` line and every prompt (search, masked passphrase, muttrs' To and Subject) share its line editing; muttrs'
+  append-only prompt goes.
+- Apps choose per action: devnull and muttrs keep `$EDITOR` for commits and mail; slackers uses the composer.
+- Rejected: `$EDITOR` only (unusable for chat); a Vim-modal editor in the kit (a project of its own).
+
+### D5. Mouse
+
+- `:set mouse=`, as Neovim, on by default. Buttons and wheel only (`?1000h ?1006h`): moving the pointer never redraws.
+- The kit hit-tests, since it owns windows and buffers: the wheel scrolls the window under the pointer; a click focuses
+  its window and moves the cursor to the cell; a click on a picker, `Pmenu` or which-key item selects it.
+- Mouse events are keys (`<LeftMouse>`, `<2-LeftMouse>`, `<ScrollWheelDown>`, …) and go through the keymap. slackers
+  keeps click-to-open as a default map; devnull may default to `mouse=` (its D1).
+- Trade-off: while the mouse is captured, selecting text in the terminal takes Shift-drag in Ghostty.
+
+### D6. Configuration
+
+- **`config.toml`**: app-owned, domain only (accounts, workspaces, the voight device, polling). The kit never reads
+  it; slackers keeps rewriting its own with `toml_edit`.
+- **`init.vim`**: kit-owned, all of the UI: `:set`, the `:map` family, `:hi`, `:colorscheme`, `:source`. One parser,
+  shared with the `:` line.
+- **Shared layer first**: `~/.config/wcgw/init.vim` and `~/.config/wcgw/colors/`, then the app's `~/.config/<app>/`.
+  One colorscheme and one leader apply to all four apps.
+- Apps register their options (`graphics`, `icons`, …) in the kit's option registry.
+- Going away: ghd's and muttrs' `themes/*.toml` (including `catppuccin-mocha.toml`), muttrs' `[keys.*]`, ghd's
+  `icons =`. A one-off script converts them to `:hi` and `:nnoremap` lines.
+
+### D7. Highlight groups and colorschemes
+
+- The kit defines Neovim's standard groups:
+  - UI: `Normal`, `NormalFloat`, `FloatBorder`, `StatusLine`, `StatusLineNC`, `TabLine`, `TabLineSel`, `TabLineFill`,
+    `WinBar`, `WinSeparator`, `CursorLine`, `Visual`, `Search`, `CurSearch`, `IncSearch`, `Pmenu`, `PmenuSel`,
+    `PmenuMatch`, `WhichKey*`, `Folded`, `NonText`, `EndOfBuffer`, `ErrorMsg`, `WarningMsg`, `MoreMsg`, `ModeMsg`,
+    `Title`.
+  - Syntax: `Comment`, `String`, `Constant`, `Function`, `Keyword`, `Type`, `Special`, `Underlined`.
+  - `DiagnosticError`, `DiagnosticWarn`, `DiagnosticInfo`, `DiagnosticHint`, `DiagnosticOk`; `Added`, `Changed`,
+    `Removed`, `DiffAdd`, `DiffDelete`; `@markup.heading`, `@markup.link`, `@markup.raw`, `@markup.quote`.
+- Apps register their groups, each with a default link to a standard one (`GhdStateMerged` → `DiagnosticHint`).
+  Registering returns a typed handle that spans carry; `:hi`, `:hi link` and `:hi clear` treat app groups like any
+  other.
+- Colorschemes define standard groups only. An app may ship overrides of its own groups for a scheme (devnull's tuned
+  `Devnull*` tokyonight colours).
+- Colorschemes are `.vim` files of `:hi` lines. Built-ins are embedded with `include_str!` and parsed exactly as user
+  files in `colors/`; devnull's generated tables (`hl/tokyonight.rs`) go.
+- Code: ghd's syntect class markers (`syntax.rs`) map onto the syntax groups.
+
+### D8. Default look
+
+- `tokyonight-moon` in all four (devnull changes from `tokyonight-night`).
+- `Normal` and `TabLineFill` without a background, as devnull's `68bb8e8` made them; floats keep `NormalFloat`'s.
+  `:hi Normal guibg=…` paints one again.
+- An ANSI-16 `default` scheme replaces ghd's and muttrs' `terminal`. Chosen automatically when the terminal doesn't
+  advertise truecolor (`COLORTERM` isn't `truecolor` or `24bit`, and the terminal isn't a known truecolor one), unless
+  the user set a scheme.
+- Windows are separated by `│` (`WinSeparator`), without boxes. Floats are rounded (`FloatBorder`); `winborder`
+  changes that.
+
+### D9. Icons
+
+- One registry: the kit's chrome icons (unread/bell, lock, picture, link, folds, error, warning, spinner) and the apps'
+  (`GhdPullRequest`, `MuttrsJunk`, …). Each is a pair `(nerd, plain)`.
+- `:set icons=auto|nerd|plain`, default `auto`: nerd in Ghostty, kitty and WezTerm, which ship the symbols
+  (`muttrs-gfx/src/lib.rs:46`), plain elsewhere.
+- A fixed width per icon, the same in both modes: the glyph and a space it can spill into. Plain fallbacks are
+  single-width (`●`, `★`, `↩`, `⚑`) or blank, padded alike, so `:set icons` never shifts a column.
+- Icons take their colours from highlight groups.
+
+### D10. Screen anatomy
+
+- **Tabline**: listed buffers (devnull's bufferline; ghd's inbox views become buffers). Sidebar buffers are unlisted.
+  `showtabline=1`.
+- **Winbar** per window: titles and breadcrumbs, supplied by the buffer (slackers' breadcrumbs, muttrs'
+  `account › mailbox`, ghd's Preview title).
+- **One global statusline** (`laststatus=3`) of segments, each with an alignment and a priority; the lowest go first
+  when narrow. Kit segments: mode, showcmd, search count `[3/7]`, Top/Bot/%, a spinner with "N more". App segments:
+  unread counts, connection state, voight.
+- **Cmdline row** (`cmdheight=1`; `cmdheight=0` merges it into the statusline). Messages as Neovim's: they stay until
+  replaced, errors in `ErrorMsg`, history in `:messages`. No toasts that expire.
+- **No permanent key hints**: which-key after a prefix, and `:help`.
+- Cost: ghd, muttrs and slackers lose a row unless `cmdheight=0`; slackers loses its hints.
+
+### D11. Windows
+
+- devnull's split tree (`:sp`, `:vs`, `<C-w>hjkl`, `:only`). Sidebars are windows.
+- `winfixwidth`/`winfixheight`, and size constraints per window: fixed, a percentage, or `clamp(min, max)`.
+- Apps build their layout through the window API the ex commands use; toggles are ex commands (`:Sidebar`, mapped to
+  `\` in muttrs and slackers).
+- No layout engine reacting to size: `Resize` reaches the app, which reshapes the tree (slackers folds the thread away
+  below 120 columns, ghd hides the Preview below 12 rows). A hidden window's buffer keeps its cursor.
+
+### D12. Keys
+
+devnull's D5, for all four:
+
+1. **The kit owns motions, and they stay pure Vim**: counts, `gg G H M L / ? n N * #`, `]]`/`[[` by item, folds,
+   `<C-o>`/`<C-i>`/`<C-t>`, Visual mode and yanks. App defaults never rebind them; users may, with `:map`.
+2. **Keys that edit text in Vim become app actions** (`c r R s d x o i a u`).
+3. **Everything else goes under `<leader>`**, `<Space>` in every app, surfaced by which-key.
+4. **Every action has an ex command**, so `:map` can rebind it.
+
+What changes: `g` is a prefix (`gg gx gd gy`) in ghd, muttrs and slackers, where it now jumps to the top. `?` searches
+backwards; help is `:help`, `<F1>` and `<leader>?`, no longer `?` in ghd and muttrs. voight's heatmap is `<leader>h`,
+no longer `H`. `q` closes a window; muttrs' Pager is one, so `q` still goes back to the Index.
+
+Shared verbs (a convention in the docs, not enforced): apps use these keys wherever their domain has the verb.
+
+| Key | Verb |
+| --- | --- |
+| `<CR>` | Open |
+| `K` | Hover, details |
+| `gx` | Open in the browser |
+| `gy` | Yank the link |
+| `c` | New |
+| `r` / `R` | Reply / quote |
+| `s` | Star, flag |
+| `dd` | Delete |
+| `<C-l>` | Refresh |
+
+### D13. Commands, registries, plugins
+
+- One registry, `Commands<A>`, the kit's own commands included: devnull's closed `Command` enum and ghd's and muttrs'
+  `match` plus name list dissolve into it. An entry: name and minimum abbreviation, whether it takes `!`, an argument
+  completer `fn(&A, &str) -> Vec<String>`, a handler `fn(&mut A, Invocation) -> Result<Effects, ExError>`, and a help
+  line and topic (feeding `:help` and which-key).
+- Keys bind only to ex commands or to the kit's motions and actions.
+- A plugin is a function, `install(&mut Kit<A>, …)`, that registers commands, default maps, highlight groups, options,
+  icons and statusline segments. No plugin trait, lifecycle or dynamic loading. Its state lives in the app's `A`,
+  reached through an accessor it's given.
+- **Range highlights**, as Neovim's extmarks: overlays of (byte range in a buffer's source text → group or style)
+  that the kit maps onto rendered spans. They replace ghd's `drawn::Finder` and muttrs' heatmap finder, and serve
+  search and diff marks too.
+
+### D14. Floats: picker, hover, confirm, help
+
+- **Picker**: nucleo with fzf syntax and match positions (slackers' `Finder`), replacing devnull's scorer and muttrs'
+  substring narrowing. Sources are a list, or async and streaming through the inbox (devnull's Users search, slackers'
+  people). Verbs are the app's, each on a key (`<CR>` the default; muttrs' Copy and Save on `<C-y>`, `<C-s>`). Number
+  selection optional per source (muttrs' Links). Items are rendered lines with groups and icons. No preview pane in
+  v1.
+- **Hover**: a float next to the cursor (devnull's and slackers' placement merged). Its content is a buffer: motions,
+  yanks and pictures work inside, and `K` again enters it, as in Neovim.
+- **Confirm**: `confirm(prompt, choices)` on the cmdline, `[y]es/[e]dit/[n]o` as devnull's. It replaces slackers'
+  Details and React modes where they are choices.
+- **`:help`** is generated from the registries, by topic; `:help zo` goes to one. ghd's `COMMAND_HELP` and muttrs'
+  `help()` go, and their drift with them.
+
+### D15. Graphics (`wcgw-kit-gfx`)
+
+- **Base: slackers-gfx/muttrs-gfx.** Kitty graphics with Unicode placeholders, RGBA (`f=32`), all 297 diacritics, the
+  `Picture::row` → `Span` API, deleting by id range (Ghostty skips virtual placements on `d=A`), eviction of the
+  least recently drawn pictures over a memory budget (slackers' `pictures.rs`), half blocks (muttrs' `blocks.rs`).
+- **From devnull**:
+  - Native animation: frames with `a=f`, looped with `a=a`, verified inside placeholders in Ghostty 1.4.0 (devnull
+    D7). slackers' ADR 0002 planned that move once Ghostty shipped it. The kit's frame timer only drives half blocks.
+  - Pausing while unfocused through `a=a` (`s=1` to stop, `s=3` to loop): to verify (M0.1).
+- **Detection**: environment variables, then an `a=q` query with a short timeout before the loop starts (devnull's D7
+  asks for one; no app has it). tmux, zellij and screen get half blocks unless `:set graphics=kitty`.
+- **Transfer**: `/dev/shm` (`t=t`) only when local, with `SSH_CONNECTION` and `SSH_TTY` unset; otherwise in-band.
+- **Floor**: Ghostty 1.4 for kitty mode; older terminals get half blocks.
+- `:set graphics=auto|kitty|halfblocks|off`. No sixel, no iTerm2 (devnull D7, muttrs ADR 0002).
+
+### D16. Rich text (`wcgw-kit-text`), after the shell
+
+- One block form, muttrs-render's (Flow, Stack, Gap, Rule, Table). Front ends behind features, as their dependencies
+  are heavy: `html` (muttrs' reader: scraper, html5ever, its CSS subset and contrast-safe colours), `markdown` (new:
+  pulldown-cmark to blocks), `syntax` (ghd's syntect class markers with two-face's syntaxes).
+- Output goes into kit buffers: spans carry highlight groups (not `Style`s), link targets, picture slots and source byte
+  ranges, which range highlights (D13) need.
+- Domain rules stay in the apps, as passes or options: mail's format=flowed, signatures and attribution; GitHub's
+  mentions and "HTML as GitHub shows it"; Slack's mrkdwn.
+- tui-markdown goes: it can't carry groups or source ranges.
+
+### D17. voight
+
+- The kit knows nothing of voight, and voight nothing of the kit.
+- The voight library gains a UI-agnostic `Assessor`, moved out of ghd's and muttrs' `assessment.rs`: a background
+  thread, falling back to the CPU when the device fails, a cache by text, one assessment at a time, the 50-word
+  minimum, `Assessment`/`Window`, and events over a channel.
+- Each app keeps a `voight.rs` (about 50–80 lines): `install(&mut Kit<A>, …)` registers `:voight [heatmap|on|off]`, a
+  statusline segment, `VoightHeat*` groups, a default `<leader>h` map, and range highlights over the text the app
+  picks (ghd: Markdown normalised as GitHub shows it; muttrs: `Document::prose()`).
+- The `voight`, `cuda`, `metal` and `wgpu` features stay in the apps.
+- Rejected: a `voight-kit` crate (it would have to pin the same kit revision as every app, or Cargo builds two kits
+  whose types don't unify); the per-app copies as they are (drifted already).
+
+### D18. Packaging
+
+- Workspace: `wcgw-kit` (the shell), `wcgw-kit-gfx` (pictures; `image`, `base64`, no tokio), `wcgw-kit-text` (D16,
+  later).
+- Apache-2.0. tokyonight's attribution ([folke/tokyonight.nvim](https://github.com/folke/tokyonight.nvim), Apache-2.0)
+  comes over from devnull. slackers' code (GPL-3.0-or-later) is relicensed by its author as it moves in.
+- **For now**: each app has a path dependency on the local checkout. CI on the apps' `wcgw-kit` branches can't resolve
+  it until the kit is pushed.
+- **Once this all works and is agreed**: `wcgw/wcgw-kit` is pushed, and the apps pin a git revision, as they pin
+  voight; `publish = false`. Local work against a checkout then goes through an uncommitted
+  `~/src/github.com/wcgw/.cargo/config.toml` with `[patch."https://github.com/wcgw/wcgw-kit"]`; its `Cargo.lock`
+  churn isn't committed.
+- Edition 2024, MSRV 1.99, `unsafe_code = "forbid"`, `missing_docs`, `missing_debug_implementations`,
+  `rust_2018_idioms`, clippy pedantic.
+
+### D19. Testing
+
+- `wcgw_kit::testing`, behind a `testing` feature the apps enable for their tests. `Harness<A>` runs the shell and the
+  app's `update` without a runtime or a terminal:
+  - `press("<leader>1")` in Vim notation, `type_text`, `click_on("text")`, `scroll`, `resize`, `send(msg)`;
+    `effects()`; `screen()` as rows and the cursor.
+  - A fake clock, `advance(Duration)`: key timeouts, which-key, the spinner and half-block animation are
+    deterministic.
+  - `group_at(x, y)` beside `style_at`: tests assert the highlight group, so they survive a change of colorscheme.
+  - Injected terminal facts: graphics, cell size (10×20), icons, focus.
+- String rows by default; insta optional for whole-screen layouts.
+- The kit's own suite tests chrome, motions, the cmdline and pickers with a small dummy app; apps don't re-test them.
+
+### D20. Process
+
+- Test-first (red → green → refactor); each step reports what ran (`fmt`, `clippy`, tests) and what didn't.
+- Review checkpoints inside milestones (⏸).
+- The user commits, between stages; Claude only when authorized in that session. Conventional-commit subjects, no AI
+  attribution. Never push; no GitHub writes.
+- Spikes live in the scratchpad, never a repo. Probes that need eyes on Ghostty are run by the user.
+- Each app moves on its own `wcgw-kit` branch, with its suite green.
+
+### Defaults (agreed together)
+
+- **History**: the kit's, on disk in `$XDG_STATE_HOME/<app>/history`, with muttrs' mechanics: the file is re-read
+  before each write so instances side by side merge; command and search lists apart; Up/Down recall by prefix; 200
+  entries.
+- **Identity**: the app gives its name, which sets `~/.config/<app>/`, its state directory and the window title. The kit
+  parses `+{cmd}` arguments (`dn +cmd`); the app parses the rest.
+- **Focus**: the kit tracks it, pauses animation itself, and tells the app (`Focus` messages). Polling cadences and
+  notifying while unfocused are the app's.
+- **Keyboard**: the kitty keyboard flags (`DISAMBIGUATE_ESCAPE_CODES`) when supported, so `<C-i>` isn't `<Tab>` and
+  `<Esc>` acts at once.
+- **Long lines**: `wrap` is a buffer option, on by default. `nowrap` buffers (ghd's table, muttrs' Index) get lines laid
+  out by the app for the window's width, cut with `…`. No horizontal scrolling in v1.
+
+## Milestones (proposed; to review)
+
+Each app ends each milestone runnable, on its `wcgw-kit` branch.
+
+### M0 Spikes (scratchpad, throwaway)
+
+- [ ] **M0.1** Native animation in placeholders paused and resumed with `a=a,s=1`/`s=3`, in Ghostty 1.4 (user runs).
+- [ ] **M0.2** The `a=q` query with a timeout: Ghostty, kitty, a terminal without graphics, and inside tmux.
+- [ ] **M0.3** Pictures over SSH: confirm `/dev/shm` transfer fails there, and in-band works.
+
+### M1 The kit, out of devnull (no behaviour changes but those listed)
+
+- [ ] **M1.1** Workspace skeleton: crates, lints, license and attribution; devnull's path dependency.
+- [ ] **M1.2** `key`; `keymap` with generic builtins, devnull's maps supplied by devnull, an open `Topic`.
+- [ ] **M1.3** `ex` into `Commands<A>`; the option registry; completion per command.
+- [ ] **M1.4** `hl`: standard groups, app groups with links, `.vim` colorschemes (tokyonight ×4, `default`); devnull's
+  `Devnull*` colours as devnull's overrides. ⏸
+- [ ] **M1.5** `doc` with a generic `Target`; `windows`/`window` laid out over a document; range highlights.
+- [ ] **M1.6** Chrome out of `impl App`: tabline, winbar, statusline segments, cmdline and messages, which-key,
+  picker, hover, confirm, generated `:help`.
+- [ ] **M1.7** `run(app)`: session, timers, `$EDITOR`, OSC 52 and 777; the test harness and fake clock. ⏸ devnull's
+  suite green, with the expected differences listed (moon by default, the new chrome).
+
+### M2 `wcgw-kit-gfx`
+
+- [ ] slackers/muttrs base, native animation, detection, in-band over SSH; devnull moves to it. ⏸ try in Ghostty.
+
+### M3 slackers
+
+- [ ] Composer, mouse, lazy and bottom-anchored buffers, async picker sources, icons. Moved code relicensed. ⏸
+
+### M4 `wcgw-kit-text`
+
+- [ ] Blocks and the HTML front end from muttrs-render; the Markdown front end; ghd's syntax classes.
+
+### M5 voight's `Assessor`
+
+- [ ] In the voight repo, from ghd's and muttrs' `assessment.rs`.
+
+### M6 muttrs, then M7 ghd
+
+- [ ] Each with its `voight.rs`, its TOML themes and keys converted, and its keys moved to D12.
+
+### M8 Publishing
+
+- [ ] Push `wcgw/wcgw-kit`; the apps pin a git revision; CI green on all four.
+
+## Found in the apps while surveying (not caused by this plan)
+
+- slackers and muttrs send pictures through `/dev/shm` whenever it's writable. Over SSH that path is on the remote
+  host, where the terminal can't read it. Follows from the code; not run over SSH (M0.3).
+- devnull's D7 calls for an `a=q` query; the code detects from the environment only.
+- muttrs carries out `:login` (`crates/muttrs/src/ui.rs:2518`), but `COMMANDS`, its completion list, lacks it.
+- muttrs declares no license.
+
+## Open questions
+
+- The shape of `A`'s contract: associated `Msg`, `Effect` and `Target` types, and how a plugin reaches its state.
+  Settled in M1.
+- Lazy buffers: how `/` searches lines that were never laid out (ask the provider? search the source text?).
+- Where the one-off TOML-to-`init.vim` converter lives, and whether it ships.
