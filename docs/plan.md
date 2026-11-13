@@ -343,7 +343,12 @@ Each app ends each milestone runnable, on its `wcgw-kit` branch.
 - [x] **M3.1** In the kit, each tested through the toy application: the composer (D4), the mouse (D5), windows of
   a size and placements (D11), winbars (D10), buffers that follow their end (D3), icons (D9), OSC 777
   notifications, nucleo in pickers (D14).
-- [ ] **M3.2** slackers on the kit. Moved code relicensed. ⏸
+- [x] **M3.2** slackers on the kit (3948e60 the port; f871cfc, 884ec98, f23d057 taking what the kit grew from it):
+  the composer with its hooks (`<Up>` edits the last Message, `<Esc>` gives an edit up), first unread on open,
+  cursorline per Message, folds on section headers, `:qa` waiting for what is on its way to Slack. Behaviour changes
+  it chose: reopening a Conversation marked unread no longer reads it at once; the sidebar suggests the first unread
+  row until a key; Workspaces in the statusline are grouped by how they stand. ⏸ Relicensing the code that moved
+  from slackers (GPL-3.0-or-later) into the kit (Apache-2.0): the author's to confirm (see D18).
 
 ### M4 `wcgw-kit-text`
 
@@ -361,7 +366,17 @@ Each app ends each milestone runnable, on its `wcgw-kit` branch.
 
 ### M6 muttrs, then M7 ghd
 
-- [ ] Each with its `voight.rs`, its TOML themes and keys converted, and its keys moved to D12.
+- [x] Each with its `voight.rs` on voight's `Assessor`, its TOML themes and keys converted to `init.vim`, and its keys
+  moved to D12.
+  - **muttrs** (a0a9bdc the port; d14e479, 3c9c076, 04f0667, d9a773a after): cursors placed by the kit in place of
+    reopening windows, `'cursorline'`, widths per window (`:vsplit` works), picker verbs for Links, Attachments and
+    Labels, `:qa` waiting for Tasks, `prompt_completing` for To: and Attach:, Links found by the text crate. Commands
+    renamed to letters only (`:notjunk`, `:delmailbox`). History is the kit's, in the same file; `!` lines are no
+    longer kept.
+  - **ghd** (e81eace the port; a724508, fe49795 after): `CursorLine::Item` in place of drawing the cursor row,
+    widths per window, one buffer each for the Preview, files list and file, every View's cursor restored from the
+    cache, counts in the tabs (`Inbox (3)`), code coloured through `highlight_code` (a wide line is cut, still
+    coloured). Waits for GitHub in `main` after `run_returning` rather than through `App::quit`.
 
 ### M8 Publishing
 
@@ -395,6 +410,12 @@ Calls made while building, and why; each can be revisited.
   hooks, the registries, segments, searching pickers, pictures' budget and `graphics=off`, the composer, the mouse,
   windows of a size, winbars, following the end, cursorline, verbs.
 - **`<C-w>q`** is bound, as in Vim.
+- **The apps built against the kit's working tree** (path dependencies, D18) while it changed: twice an agent caught
+  it mid-edit and checked against a `git archive` of the kit's HEAD instead. Every commit of the kit builds; M8's
+  pinned revisions end this.
+- **Still open, from the ports**: a span carries one highlight group, so ghd lays its read/unread/selected styles
+  over a View's when drawing it, and `:hi` on those shows at the next redraw; a buffer shown in two windows of
+  different widths is laid out (by the application) for one of them.
 - **History is written when quitting**, merged with the file as it is then, rather than at every entry as muttrs
   did: the kit's core stays free of I/O; a crash loses that run's entries.
 - **Lazy lines** (D3) are not built: no application has needed them yet; slackers' and muttrs' histories are paged
