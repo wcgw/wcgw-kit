@@ -976,7 +976,9 @@ fn builtins(leader: Key) -> HashMap<Mode, Table> {
         let newer = Target::Action(Action::JumpNewer);
         bind(&mut normal, notation, newer, "jump forward", Topic::JUMPING);
     }
-    let commands: [(&str, &str, &str, Topic); 18] = [
+    let commands: [(&str, &str, &str, Topic); 20] = [
+        ("<F1>", "help", "help", Topic::SEARCHING),
+        ("<leader>?", "help", "help", Topic::SEARCHING),
         ("<CR>", "open", "open under cursor", Topic::OPENING),
         ("<C-]>", "open", "open under cursor", Topic::OPENING),
         ("<C-t>", "pop", "back from what was opened", Topic::OPENING),
@@ -1029,6 +1031,18 @@ mod tests {
 
     fn motion(motion: Motion) -> Invocation {
         run(Action::Motion(motion), None)
+    }
+
+    #[test]
+    fn every_app_has_help_on_f1_and_leader_question_mark() {
+        let mut keymap = Keymap::new();
+        for notation in ["<F1>", "<leader>?"] {
+            assert_eq!(
+                feed(&mut keymap, Mode::Normal, notation),
+                [ex("help")],
+                "{notation}"
+            );
+        }
     }
 
     #[test]
