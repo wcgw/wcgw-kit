@@ -13,5 +13,8 @@ workspace = true
 [dependencies]
 crossterm.workspace = true
 ratatui.workspace = true
+regex.workspace = true
+unicode-segmentation.workspace = true
+unicode-width.workspace = true
 
 [dev-dependencies]

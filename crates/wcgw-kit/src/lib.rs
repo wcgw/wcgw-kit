@@ -5,5 +5,6 @@
 //! around them. Applications bring their own content and commands. Decisions and their reasons live in
 //! `docs/plan.md`; module docs name the relevant entries (D1 and so on).
 
+pub mod doc;
 pub mod hl;
 pub mod key;
