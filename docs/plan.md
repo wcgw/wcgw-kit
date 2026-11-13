@@ -353,7 +353,11 @@ Each app ends each milestone runnable, on its `wcgw-kit` branch.
 
 ### M5 voight's `Assessor`
 
-- [ ] In the voight repo, from ghd's and muttrs' `assessment.rs`.
+- [x] `voight::assessor` on voight's branch `wcgw-kit` (ae23138, from 26c88c9, the revision the apps pinned): the
+  thread, the CPU fallback, the 50-word check, `Assessment`/`Window`, events through a callback. Committed through a
+  worktree in the scratchpad, removed since: the checkout at `voight/` was on `pangram` with uncommitted work, left
+  as it was. Until voight's branch is pushed, the apps depend on it as `git = "file:///…/voight", branch =
+  "wcgw-kit"`.
 
 ### M6 muttrs, then M7 ghd
 
