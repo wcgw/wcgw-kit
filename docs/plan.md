@@ -391,8 +391,9 @@ Calls made while building, and why; each can be revisited.
   way; frames through `/dev/shm` are untried. Still pictures use `/dev/shm` when local (slackers' way, unverified
   in 1.4 by this work). A terminal that doesn't animate (Ghostty before 1.4) gets the first frame only, rather than
   slackers' frame swapping.
-- **The kit has its own shell suite** now (a toy application, 16 tests), for what devnull's doesn't reach: hooks,
-  the registries, segments, searching pickers, pictures' budget and `graphics=off`.
+- **The kit has its own shell suite** now (a toy application, about 50 tests), for what devnull's doesn't reach:
+  hooks, the registries, segments, searching pickers, pictures' budget and `graphics=off`, the composer, the mouse,
+  windows of a size, winbars, following the end, cursorline, verbs.
 - **`<C-w>q`** is bound, as in Vim.
 - **History is written when quitting**, merged with the file as it is then, rather than at every entry as muttrs
   did: the kit's core stays free of I/O; a crash loses that run's entries.
@@ -408,6 +409,20 @@ Calls made while building, and why; each can be revisited.
 - **Markdown goes through HTML** (pulldown-cmark's), rather than a reader of its own: one layout for both.
 - **The mail-only parts stay in the text crate for now** (plain text's quotes, format=flowed and signatures): they
   read any plain text well enough, and muttrs is their only user. D16 put them in the application.
+- **Quitting can wait** (muttrs' sends and saves): `App::quit` answers `Quitting::Later` to `:q` on the last window
+  or `:qa`, and the application sends `Effect::Quit` once done. `:qa!` doesn't ask. The kit doesn't show that it is
+  waiting; the application says so (`kit.info`).
+- **Pictures from the start**: `Kit::start` asks for the pictures in view, and the runtime keeps the first resize's
+  effects; before, a picture on the first screen waited for the first key.
+- **What an application may read back**: `Kit::graphics` (`:set graphics=`), `Kit::on_closed_fold`,
+  `Kit::window_cursor`, `Kit::text_width`. Options aren't announced when they change; an application reads them when
+  it needs them.
+- **Command names are letters only** (`ex.rs` splits the name at the first non-letter), as Vim's: muttrs renamed
+  `:not-junk` to `:notjunk` and `:delete-mailbox` to `:delmailbox` (its ADR 0007).
+- **Picker verbs** act on the choice under the cursor and leave the picker open (`<C-d>` deletes a draft, say); the
+  border's bottom says them. A pick still closes it.
+- **The composer's hooks**: `on_key` sees a key before the text area does and may take it, `on_word` hears the word
+  before the cursor as it changes, `on_leave` hears insert mode end (to keep a draft, say).
 - **The composer's completion** gives the application the word before the cursor; the application decides what it
   is (an @-mention, an emoji, a slash command), returns suggestions, and hears which was chosen, to keep what it
   means (slackers' picked references stay slackers').
