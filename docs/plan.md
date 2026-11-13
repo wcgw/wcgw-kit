@@ -189,8 +189,15 @@ Shared verbs (a convention in the docs, not enforced): apps use these keys where
 | `dd` | Delete |
 | `\` | The sidebar: go to it, hide it from within, bring it back (`:sidebar`) |
 | `q` | Close the window; quit rather than leave a sidebar alone |
-| `<C-l>` | Refresh |
+| `<C-l>` | Refresh (`:e!`); `:e NAME` opens by name |
 | `<F1>`, `<leader>?`, `gt`, `gT` | Help, next and previous buffer (the kit binds them) |
+| `!` | Run a command with the terminal (`:shell`, `:!CMD`; the kit binds it) |
+
+Commands shared by apps mean the same in each and are said the same in `:help`: `:details`, `:browse` (the thing on
+the web) and `:browse link` (the link under the cursor, else the only one of what holds it, or a list of them),
+`:yanklink`, `:toggle(!)`, `:select`, `:unselect`, `:filter`, `:clear`, `:sidebar`, `:exit`, `:voight` (`heatmap`
+shows or hides; `on` and `off` start and stop assessing). Help texts say "yank", and an app's glossary terms
+capitalised. One-letter abbreviations are the kit's (`:e`, `:b`, `:q`, `:h`, `:o`).
 
 Dates are said the kit's way (`wcgw_kit::when`): `ago` in a feed's column (`5m`, `3h`, `2d`, `6w`, `1y`; ghd,
 devnull), `short` in a list of mail or chat (`14:05`, `5 Nov`, `Nov 2025`; muttrs, slackers), `long` and `day` in
@@ -437,6 +444,13 @@ Calls made while building, and why; each can be revisited.
   the kit d964a82, 166461f, 46bf749, f647dd2; devnull 1afa472, 8285b6c, 7c0b259; ghd 3c7bfdf, 74e5723, 033c800,
   51535cc, 11e7c31, efaa01c; muttrs a9072a5, fb1db7a, 24d3c66, 6826bbd, b91a842, 25a3525, b614a9f, f6c6cc2;
   slackers e69e1e5 (`q` left the sidebar alone), 03147d4, a51d19c, d8a8f06.
+- **Commands the same way** (a second pass): muttrs' duplicates went (`:refresh` and `:cd` were `:e!` and `:e NAME`;
+  `:sync` lists the open Mailbox anew), `:limit` is `:filter` as ghd's, `:shell` went into the kit, `:browse link`
+  off a link lists what holds it in devnull and ghd too (the kit's `targets_in_block_under_cursor`), muttrs'
+  `:voight on`/`off` start and stop assessing as ghd's, and the wording and abbreviations follow D12. Commits: the
+  kit a3f1955, ad39f88; devnull c61dbbc, f76ca47; ghd df18dda, c981398, b80f0c6 (with a clippy slip, 07e0fe2);
+  muttrs 0d35d77, e4e9fe4, aee8819, 64f3254, 95590fd, d46290f, 3c6d76a; slackers 1afe686 (a doc comment misplaced
+  in a51d19c), 953e5fe, f4bd41f.
 - **Still open, from the ports**: a span carries one highlight group, so ghd lays its read/unread/selected styles
   over a View's when drawing it, and `:hi` on those shows at the next redraw; a buffer shown in two windows of
   different widths is laid out (by the application) for one of them.
