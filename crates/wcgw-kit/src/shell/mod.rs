@@ -313,6 +313,20 @@ impl<A: App> Kit<A> {
 
     // --- What the terminal tells. ---
 
+    /// The command lines and searches typed, oldest first.
+    pub(crate) fn history(&self) -> crate::history::Entries {
+        crate::history::Entries {
+            commands: self.ex_history.clone(),
+            searches: self.search_history.clone(),
+        }
+    }
+
+    /// Takes `entries` as the command lines and searches typed before.
+    pub(crate) fn set_history(&mut self, entries: crate::history::Entries) {
+        self.ex_history = entries.commands;
+        self.search_history = entries.searches;
+    }
+
     /// The terminal's size in cells, as (width, height), as last told by [`Msg::Resize`].
     #[must_use]
     pub fn size(&self) -> (u16, u16) {

@@ -8,6 +8,7 @@
 pub mod app;
 pub mod doc;
 pub mod ex;
+mod history;
 pub mod hl;
 pub mod key;
 pub mod keymap;

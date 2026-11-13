@@ -87,6 +87,28 @@ pub async fn run<A: App, P: Perform<A>>(
     name: &'static str,
     mut app: A,
     mut kit: Kit<A>,
+    performer: P,
+    channel: (Inbox<A::Msg>, Mailbox<A::Msg>),
+) -> io::Result<()> {
+    let env = |name| std::env::var_os(name).map(PathBuf::from);
+    let history = crate::history::path(name, env("XDG_STATE_HOME"), env("HOME"));
+    if let Some(path) = &history {
+        kit.set_history(crate::history::read(path));
+    }
+    let ran = run_loop(name, &mut app, &mut kit, performer, channel).await;
+    // As muttrs did: what is there now first, so that two running keep what each other typed.
+    if let Some(path) = &history {
+        let merged = crate::history::merged(&crate::history::read(path), &kit.history());
+        let _ = crate::history::write(path, &merged);
+    }
+    ran
+}
+
+/// The loop of [`run`], until the application quits.
+async fn run_loop<A: App, P: Perform<A>>(
+    name: &'static str,
+    app: &mut A,
+    kit: &mut Kit<A>,
     mut performer: P,
     (inbox, Mailbox(mut arrived)): (Inbox<A::Msg>, Mailbox<A::Msg>),
 ) -> io::Result<()> {
@@ -100,10 +122,10 @@ pub async fn run<A: App, P: Perform<A>>(
         let _ = kit.theme_mut().colorscheme(crate::hl::ANSI_COLORSCHEME);
     }
     kit.number_pictures_from(first_picture_id());
-    measure_cells(&mut kit);
+    measure_cells(kit);
     let size = terminal.size()?;
     let _ = kit.update(
-        &mut app,
+        app,
         Msg::Resize {
             width: size.width,
             height: size.height,
@@ -118,7 +140,7 @@ pub async fn run<A: App, P: Perform<A>>(
         .flat_map(|config| [config.join("wcgw"), config.join(name)])
         .collect();
     for dir in &dirs {
-        add_colorschemes(&mut kit, &dir.join("colors"));
+        add_colorschemes(kit, &dir.join("colors"));
     }
     for dir in &dirs {
         let init = dir.join("init.vim");
@@ -148,14 +170,14 @@ pub async fn run<A: App, P: Perform<A>>(
         animates: facts.animates,
     };
     let perform = |effect, performer: &mut P| perform(effect, &inbox, performer, &pictures);
-    for effect in kit.start(&mut app) {
+    for effect in kit.start(app) {
         if let Step::Quit = perform(effect, &mut performer)? {
             return Ok(());
         }
     }
     let mut clicks = Clicks::default();
     loop {
-        terminal.draw(|frame| kit.render(&app, frame))?;
+        terminal.draw(|frame| kit.render(app, frame))?;
         // Both branches are cancel-safe: an event or message not taken now stays queued.
         let msg = tokio::select! {
             event = events.next() => {
@@ -171,9 +193,9 @@ pub async fn run<A: App, P: Perform<A>>(
         };
         if let Msg::Resize { .. } = msg {
             // The font may have changed size with the window.
-            measure_cells(&mut kit);
+            measure_cells(kit);
         }
-        for effect in kit.update(&mut app, msg) {
+        for effect in kit.update(app, msg) {
             match perform(effect, &mut performer)? {
                 Step::Go => {}
                 Step::Quit => return Ok(()),
