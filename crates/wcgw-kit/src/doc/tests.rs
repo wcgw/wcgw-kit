@@ -1466,3 +1466,31 @@ fn a_picture_wrapped_onto_the_next_row_belongs_to_that_row() {
         )]
     );
 }
+
+#[test]
+fn setting_the_blocks_keeps_cursors_and_folds_in_those_kept() {
+    let mut doc = doc(&[("a", &["one"]), ("b", &["two", "three"]), ("c", &["four"])]);
+    let layout = Layout::new(&doc, 20);
+    let mut cursor = Cursor::new();
+    cursor.apply(&layout, Motion::Down, 2);
+    assert_eq!(cursor.screen(&layout), at(2, 0), "on three");
+
+    doc.set_blocks([
+        ("z".into(), Content::from(vec![Line::text("zero")])),
+        (
+            "b".into(),
+            Content::from(vec![Line::text("TWO"), Line::text("THREE")]),
+        ),
+        ("a".into(), Content::from(vec![Line::text("one")])),
+    ]);
+
+    let layout = Layout::new(&doc, 20);
+    assert_eq!(
+        cursor.screen(&layout),
+        at(2, 0),
+        "still on the block's second line"
+    );
+    assert_eq!(doc.line_text("b", 1), Some("THREE"));
+    assert!(!doc.contains("c"));
+    assert!(doc.contains("z"));
+}

@@ -570,6 +570,33 @@ impl<T> Document<T> {
         true
     }
 
+    /// Makes the document exactly `blocks`, in order: a block whose key was there keeps its identity (cursors and
+    /// folds in it stay), new ones join, and those not given go. For an application that renders its whole state
+    /// after every change, as a chat's timeline is.
+    ///
+    /// # Panics
+    ///
+    /// If two blocks share a key.
+    pub fn set_blocks(&mut self, blocks: impl IntoIterator<Item = (BlockKey, Content<T>)>) {
+        let mut ids: HashMap<BlockKey, u64> = self
+            .blocks
+            .iter()
+            .map(|block| (block.key.clone(), block.id))
+            .collect();
+        let mut seen = std::collections::HashSet::new();
+        self.blocks = blocks
+            .into_iter()
+            .map(|(key, content)| {
+                assert!(seen.insert(key.clone()), "duplicate block key {key:?}");
+                match ids.remove(&key) {
+                    Some(id) => Block::with_id(id, key, content),
+                    None => Block::new(key, content),
+                }
+            })
+            .collect();
+        self.reindex();
+    }
+
     /// Removes the block `key`, if present. Cursors in it move to whatever takes its place.
     pub fn remove(&mut self, key: impl Into<BlockKey>) {
         let key = key.into();

@@ -804,7 +804,7 @@ impl<A: App> Kit<A> {
             }
             Msg::Resize { width, height } => {
                 self.size = (width, height);
-                Vec::new()
+                app.resized(self, width, height)
             }
             Msg::Failed(text) => {
                 self.error(text);

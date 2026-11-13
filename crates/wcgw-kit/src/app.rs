@@ -85,6 +85,13 @@ pub trait App: Sized + 'static {
         Vec::new()
     }
 
+    /// The terminal is `width` × `height` cells now: the application may reshape its windows (D11), as a thread
+    /// beside its conversation that a narrow screen can't hold.
+    fn resized(&mut self, kit: &mut Kit<Self>, width: u16, height: u16) -> Effects<Self> {
+        let _ = (kit, width, height);
+        Vec::new()
+    }
+
     /// The terminal gained (`true`) or lost focus.
     fn focus(&mut self, kit: &mut Kit<Self>, focused: bool) -> Effects<Self> {
         let _ = (kit, focused);
