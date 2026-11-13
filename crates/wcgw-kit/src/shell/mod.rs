@@ -70,6 +70,8 @@ pub struct Buffer<T> {
     cursorline: CursorLine,
     /// The widest it's laid out, for prose (`'textwidth'`, through [`Kit::set_prose`]); `None` to fill its windows.
     textwidth: Option<u16>,
+    /// Whether `:bdelete` let it go: no name finds it again, and opening that name makes another.
+    deleted: bool,
 }
 
 /// What a window highlights where its cursor is, in [`Group::CURSOR_LINE`](crate::hl::Group::CURSOR_LINE):
@@ -165,6 +167,7 @@ impl<T> Buffer<T> {
             follows_end: false,
             cursorline: CursorLine::Off,
             textwidth: None,
+            deleted: false,
         }
     }
 }
@@ -451,7 +454,7 @@ impl<A: App> Kit<A> {
     pub fn find_buffer(&self, name: &str) -> Option<BufferId> {
         self.buffers
             .iter()
-            .position(|buffer| buffer.name == name)
+            .position(|buffer| buffer.name == name && !buffer.deleted)
             .map(BufferId)
     }
 
@@ -543,6 +546,7 @@ impl<A: App> Kit<A> {
         self.shown.retain(|&shown| shown != id);
         let buffer = &mut self.buffers[id.0];
         buffer.listed = false;
+        buffer.deleted = true;
         buffer.doc = Document::new();
         buffer.winbar = None;
         Ok(effects)

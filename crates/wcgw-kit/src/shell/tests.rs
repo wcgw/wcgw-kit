@@ -287,13 +287,13 @@ fn bdelete_takes_a_buffer_out_of_the_list_and_its_windows_show_the_one_before() 
         "the one before"
     );
     assert_eq!(toy.screen().rows[0], " page/home  page/x");
-    assert!(
-        !toy.kit
-            .buffer(toy.kit.find_buffer("page/y").unwrap())
-            .doc()
-            .contains("head"),
-        "emptied"
-    );
+    assert_eq!(toy.kit.find_buffer("page/y"), None, "no name finds it");
+    let (_, deleted) = toy
+        .kit
+        .buffers()
+        .find(|(_, buffer)| buffer.name() == "page/y")
+        .expect("still there, by its id");
+    assert!(!deleted.doc().contains("head"), "emptied");
 
     // By name, another than the current one; its jumps go too.
     let _ = toy.press(":bd page/home<CR>");
@@ -301,6 +301,10 @@ fn bdelete_takes_a_buffer_out_of_the_list_and_its_windows_show_the_one_before() 
     assert_eq!(listed(&toy), ["page/x"]);
     let _ = toy.press("<C-o>");
     assert_eq!(toy.kit.buffer(toy.kit.current_buffer()).name(), "page/x");
+    // Opened again, it's another buffer, listed.
+    let _ = toy.press(":e page/y<CR>");
+    assert_eq!(listed(&toy), ["page/x", "page/y"]);
+    let _ = toy.press(":bd<CR>");
 
     // Not the last, nor one the application keeps.
     let _ = toy.press(":bd<CR>");
