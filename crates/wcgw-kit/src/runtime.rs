@@ -503,9 +503,9 @@ fn run_shell(shell: &crate::app::Shell) -> Result<i32, String> {
     let mut child = command
         .spawn()
         .map_err(|error| format!("cannot run {}: {error}", shell.command))?;
-    if let (Some(text), Some(mut stdin)) = (&shell.stdin, child.stdin.take()) {
+    if let (Some(bytes), Some(mut stdin)) = (&shell.stdin, child.stdin.take()) {
         // A command that stops reading early (`head`) closes the pipe: not an error of ours.
-        let _ = io::Write::write_all(&mut stdin, text.as_bytes());
+        let _ = io::Write::write_all(&mut stdin, bytes);
     }
     let status = child
         .wait()
@@ -980,6 +980,9 @@ mod tests {
         assert_eq!(run_shell(&piped), Ok(0));
         assert_eq!(run_shell(&missing), Ok(1));
         assert_eq!(run_shell(&crate::app::Shell::new("exit 3")), Ok(3));
+        let latin1 = crate::app::Shell::new("test \"$(od -An -tx1 | tr -d ' \\n')\" = e90a")
+            .stdin(vec![0xe9, b'\n']);
+        assert_eq!(run_shell(&latin1), Ok(0), "bytes as they are, not UTF-8");
         assert_eq!(
             run_shell(&crate::app::Shell::new("kill -9 $$")),
             Err("kill -9 $$ was stopped".into())

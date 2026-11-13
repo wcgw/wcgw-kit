@@ -274,8 +274,8 @@ impl Edit {
 pub struct Shell {
     /// The command line.
     pub command: String,
-    /// What it reads, as a message piped to it; the terminal when `None`.
-    pub stdin: Option<String>,
+    /// What it reads, byte for byte, as a mail piped to it; the terminal when `None`.
+    pub stdin: Option<Vec<u8>>,
     /// Whether to wait for Enter once it exits, before the application shows again.
     pub wait: bool,
 }
@@ -291,11 +291,11 @@ impl Shell {
         }
     }
 
-    /// Reading `text`, as `|` pipes a message.
+    /// Reading `bytes` as they are (text, or a mail in any charset), as `|` pipes a message.
     #[must_use]
-    pub fn stdin(self, text: impl Into<String>) -> Self {
+    pub fn stdin(self, bytes: impl Into<Vec<u8>>) -> Self {
         Self {
-            stdin: Some(text.into()),
+            stdin: Some(bytes.into()),
             ..self
         }
     }
