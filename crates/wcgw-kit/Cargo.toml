@@ -12,9 +12,17 @@ workspace = true
 
 [dependencies]
 crossterm.workspace = true
+futures-util.workspace = true
 ratatui.workspace = true
 regex.workspace = true
+tokio.workspace = true
 unicode-segmentation.workspace = true
 unicode-width.workspace = true
+wcgw-kit-gfx.workspace = true
+
+[features]
+# The test harness (D19), for applications' tests.
+testing = []
 
 [dev-dependencies]
+tempfile.workspace = true

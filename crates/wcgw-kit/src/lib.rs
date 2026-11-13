@@ -5,7 +5,18 @@
 //! around them. Applications bring their own content and commands. Decisions and their reasons live in
 //! `docs/plan.md`; module docs name the relevant entries (D1 and so on).
 
+pub mod app;
 pub mod doc;
+pub mod ex;
 pub mod hl;
 pub mod key;
 pub mod keymap;
+pub mod runtime;
+pub mod shell;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
+
+pub use app::{App, BufferId, Effect, Effects, Msg};
+pub use shell::Kit;
+/// Pictures in the terminal (D15).
+pub use wcgw_kit_gfx as gfx;
