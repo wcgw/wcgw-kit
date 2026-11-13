@@ -147,7 +147,7 @@ impl<A: App> Kit<A> {
                 ));
                 return;
             }
-            Mode_::Normal | Mode_::Visual(_) | Mode_::Insert(_) => {}
+            Mode_::Normal | Mode_::Visual(_) | Mode_::Insert(_) | Mode_::Hover { .. } => {}
         }
         if let Some(message) = &self.message {
             let group = match message.kind {
@@ -403,7 +403,7 @@ impl<A: App> Kit<A> {
     /// The mode as the statusline names and colours it.
     fn mode_label(&self) -> (&'static str, Group) {
         match &self.mode {
-            Mode_::Normal | Mode_::MorePrompt { .. } | Mode_::Confirm(_) => {
+            Mode_::Normal | Mode_::MorePrompt { .. } | Mode_::Confirm(_) | Mode_::Hover { .. } => {
                 ("NORMAL", Group::STATUS_LINE_MODE_NORMAL)
             }
             Mode_::Visual(selection) => match selection.kind() {

@@ -1080,6 +1080,57 @@ fn quitting_waits_for_an_application_that_asks_but_not_with_a_bang() {
 }
 
 #[test]
+fn showing_the_card_again_enters_it_to_scroll_and_open_from() {
+    let mut toy = toy(40, 16);
+    toy.kit
+        .add_command(Command::new("card", 4, |_: &mut Toy, kit, _| {
+            let mut card = Document::new();
+            let lines = (0..12)
+                .map(|n| {
+                    let span = Span::new(format!("line {n}"), Group::NORMAL);
+                    Line::Text(vec![if n == 7 {
+                        span.with_target(Thing::Link("seven".into()))
+                    } else {
+                        span
+                    }])
+                })
+                .collect::<Vec<_>>();
+            card.push_back("card", crate::doc::Content::from(lines));
+            kit.show_hover(card);
+            Ok(Vec::new())
+        }));
+    toy.kit.keymap_mut().bind_keys(
+        &[crate::keymap::Mode::Normal],
+        "K",
+        ":card<CR>",
+        "a card",
+        crate::keymap::Topic::new(75, "Toy"),
+    );
+    let shows =
+        |toy: &Harness<Toy>, text: &str| toy.screen().rows.iter().any(|row| row.contains(text));
+
+    let _ = toy.press("K");
+    assert!(shows(&toy, "line 0"));
+    let _ = toy.press("j");
+    assert!(!shows(&toy, "line 0"), "the next key takes it away");
+
+    let _ = toy.press("KKG");
+    assert!(
+        shows(&toy, "line 11") && !shows(&toy, "line 0"),
+        "{:?}",
+        toy.screen().rows
+    );
+    let _ = toy.press("gg");
+    assert!(shows(&toy, "line 0"));
+    let _ = toy.press("q");
+    assert!(!shows(&toy, "line 0"), "q leaves it");
+
+    let _ = toy.press("KKjjjjjjj<CR>");
+    assert_eq!(toy.app.opened, [Thing::Link("seven".into())]);
+    assert!(!shows(&toy, "line 0"));
+}
+
+#[test]
 fn quitting_frees_the_pictures_however_it_comes() {
     for busy in [false, true] {
         let mut toy = toy(40, 8);

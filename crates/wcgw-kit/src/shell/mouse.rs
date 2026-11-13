@@ -23,6 +23,12 @@ impl<A: App> Kit<A> {
         match &self.mode {
             Mode_::Picker(_) => return self.picker_click(app, mouse, column, row),
             Mode_::Cmdline(_) | Mode_::Confirm(_) | Mode_::MorePrompt { .. } => return Vec::new(),
+            Mode_::Hover { .. } if matches!(mouse, Mouse::WheelUp | Mouse::WheelDown) => {
+                self.hover_scroll(mouse == Mouse::WheelDown, WHEEL_ROWS);
+                return Vec::new();
+            }
+            // A click leaves the card for where it lands.
+            Mode_::Hover { .. } => self.close_hover(),
             Mode_::Insert(id) if matches!(mouse, Mouse::Left | Mouse::DoubleLeft) => {
                 let id = *id;
                 self.mode = Mode_::Normal;

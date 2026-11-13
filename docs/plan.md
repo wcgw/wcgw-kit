@@ -423,6 +423,10 @@ Calls made while building, and why; each can be revisited.
   choices (`Picker::set_choices`, after deleting a draft, say) or close it (`Kit::close_picker`, to open what was
   chosen in a split, say); the border's bottom says them. A pick still closes it. (Before 8634e00 a verb closed
   the picker, against what this note said; slackers found it.)
+- **The hover card can be entered** as Neovim's: showing it again by the key that showed it (`K` twice) enters
+  it. `j`/`k`, `<C-d>`/`<C-u>`, `gg`/`G` and the wheel go through it with a cursorline, `<CR>` opens what its row
+  refers to through `App::open`, and `q`, `<Esc>`, `K` or a click leave it. It isn't a window: no search, no visual
+  selection, no `<C-w>` into it.
 - **Any quit frees the pictures**: `Kit::update` puts the escapes deleting what the terminal holds before an
   `Effect::Quit`, the application's own (after `Quitting::Later`) as the kit's.
 - **The composer's hooks**: `on_key` sees a key before the text area does and may take it, `on_word` hears the word

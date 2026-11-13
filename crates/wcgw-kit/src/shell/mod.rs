@@ -157,6 +157,13 @@ enum Mode_<A: App> {
     Confirm(Confirm<A>),
     /// Typing into the composer of a buffer.
     Insert(BufferId),
+    /// In the card `K` shows, entered by showing it again: on its `row`, `top` the first row it shows; `g` after a
+    /// first `g`.
+    Hover {
+        row: usize,
+        top: usize,
+        g: bool,
+    },
 }
 
 /// A line for the command line area.
@@ -209,6 +216,8 @@ pub struct Kit<A: App> {
     which_key: bool,
     /// The card `K` shows, until the next key.
     hover: Option<Document<A::Target>>,
+    /// How many rows of it were drawn last, for moving through it a half at a time.
+    hover_rows: std::cell::Cell<u16>,
     /// Buffers in the order they were last shown, the latest first.
     recent: Vec<BufferId>,
     /// The pictures asked for.
@@ -264,6 +273,7 @@ impl<A: App> Kit<A> {
             search_generation: 0,
             which_key: false,
             hover: None,
+            hover_rows: std::cell::Cell::new(0),
             recent: Vec::new(),
             pictures: pictures::Pictures::default(),
             highlighting: false,
@@ -797,7 +807,10 @@ impl<A: App> Kit<A> {
         self.mode = Mode_::Cmdline(Cmdline::new(purpose, None));
     }
 
-    /// Shows `doc` in a card next to the cursor, until the next key, as `K` does in Neovim.
+    /// Shows `doc` in a card next to the cursor, until the next key, as `K` does in Neovim. Showing one again by
+    /// the key that showed it enters it: `j`, `k`, `<C-d>`, `<C-u>`, `gg`, `G` and the wheel go through it, `<CR>`
+    /// opens what its row refers to ([`App::open`]), `q`, `<Esc>` and `K` leave it. A card changed while entered
+    /// stays entered.
     pub fn show_hover(&mut self, doc: Document<A::Target>) {
         self.hover = Some(doc);
     }
@@ -807,9 +820,12 @@ impl<A: App> Kit<A> {
         self.hover.as_mut()
     }
 
-    /// Takes away the card shown next to the cursor.
+    /// Takes away the card shown next to the cursor, and leaves it if it was entered.
     pub fn close_hover(&mut self) {
         self.hover = None;
+        if let Mode_::Hover { .. } = self.mode {
+            self.mode = Mode_::Normal;
+        }
     }
 
     /// Opens `picker` over the windows; one that searches searches for its query at once.
@@ -982,11 +998,21 @@ impl<A: App> Kit<A> {
         match &mut self.mode {
             Mode_::Normal | Mode_::Visual(_) => {
                 self.message = None;
-                // As Neovim's hover window, the card goes with the next key, which also does its usual job.
-                self.hover = None;
+                // As Neovim's hover window, the card goes with the next key, which also does its usual job; if that
+                // shows it again, as `K` does, the card is entered.
+                let had_hover = self.hover.take().is_some();
                 let ran = self.keymap.feed(self.keymap_mode(), key);
-                self.run_all(app, ran)
+                let effects = self.run_all(app, ran);
+                if had_hover && self.hover.is_some() && matches!(self.mode, Mode_::Normal) {
+                    self.mode = Mode_::Hover {
+                        row: 0,
+                        top: 0,
+                        g: false,
+                    };
+                }
+                effects
             }
+            Mode_::Hover { .. } => self.hover_key(app, key),
             Mode_::MorePrompt { .. } => {
                 self.mode = Mode_::Normal;
                 // As in Vim, <CR>, <Space> and <Esc> only dismiss; any other key also does its usual job.
@@ -1446,7 +1472,8 @@ impl<A: App> Kit<A> {
             | Mode_::MorePrompt { .. }
             | Mode_::Picker(_)
             | Mode_::Confirm(_)
-            | Mode_::Insert(_) => self.key(app, key),
+            | Mode_::Insert(_)
+            | Mode_::Hover { .. } => self.key(app, key),
         }
     }
 
