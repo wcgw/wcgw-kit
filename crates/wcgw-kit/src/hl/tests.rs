@@ -47,7 +47,7 @@ fn every_built_in_colorscheme_defines_every_standard_group() {
 }
 
 #[test]
-fn tokyonight_leaves_the_background_to_the_terminal_as_its_transparent_option_does() {
+fn tokyonight_leaves_the_background_to_the_terminal_floats_too_as_its_transparent_options_do() {
     for name in [
         "tokyonight-night",
         "tokyonight-storm",
@@ -58,9 +58,15 @@ fn tokyonight_leaves_the_background_to_the_terminal_as_its_transparent_option_do
 
         assert_eq!(theme.style(Group::NORMAL).bg, None, "{name}");
         assert_eq!(theme.style(Group::TAB_LINE_FILL).bg, None, "{name}");
+        assert_eq!(
+            theme.style(Group::NORMAL_FLOAT).bg,
+            None,
+            "{name}: floats too"
+        );
+        assert_eq!(theme.style(Group::FLOAT_BORDER).bg, None, "{name}");
         assert!(
-            theme.style(Group::NORMAL_FLOAT).bg.is_some(),
-            "{name}: floats keep theirs"
+            theme.style(Group::PMENU_SEL).bg.is_some(),
+            "{name}: what's chosen in a float still shows"
         );
     }
 }

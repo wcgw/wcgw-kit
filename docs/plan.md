@@ -116,7 +116,8 @@ to night) and leave the background to the terminal.
 ### D8. Default look
 
 - `tokyonight-moon` in all four (devnull changes from `tokyonight-night`).
-- `Normal` and `TabLineFill` without a background, as devnull's `68bb8e8` made them; floats keep `NormalFloat`'s.
+- `Normal` and `TabLineFill` without a background, as devnull's `68bb8e8` made them; floats too (`NormalFloat`,
+  `FloatBorder`, `FloatTitle`), as tokyonight's `floats = "transparent"` in the author's Neovim.
   `:hi Normal guibg=…` paints one again.
 - An ANSI-16 `default` scheme replaces ghd's and muttrs' `terminal`. Chosen automatically when the terminal doesn't
   advertise truecolor (`COLORTERM` isn't `truecolor` or `24bit`, and the terminal isn't a known truecolor one), unless

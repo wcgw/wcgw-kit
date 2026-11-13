@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Writes the kit's tokyonight colorschemes (`crates/wcgw-kit/colors/tokyonight-*.vim`) from folke/tokyonight.nvim's
-`extras/lua/tokyonight_<style>.lua`, as with its `transparent = true`: Normal and TabLineFill leave the background
+`extras/lua/tokyonight_<style>.lua`, as with its `transparent = true` and `styles.floats = "transparent"`, as the
+author's Neovim has it: Normal, TabLineFill and the floats (NormalFloat, FloatBorder, FloatTitle) leave the background
 to the terminal.
 
     scripts/tokyonight.py <commit> <dir holding tokyonight_{night,storm,moon,day}.lua> <out dir>
@@ -30,6 +31,10 @@ GROUPS = [
 ]
 
 ATTRS = ["bold", "italic", "underline", "undercurl", "strikethrough", "reverse"]
+
+
+# What leaves the background to the terminal: tokyonight's `transparent = true`, and its floats made transparent.
+TRANSPARENT = ("Normal", "TabLineFill", "NormalFloat", "FloatBorder", "FloatTitle")
 
 
 def parse(text):
@@ -97,7 +102,7 @@ def scheme(style, palette, groups):
             while isinstance(spec, str) and spec not in GROUPS and spec not in seen:
                 seen.add(spec)
                 spec = groups.get(spec, {})
-        if name in ("Normal", "TabLineFill") and isinstance(spec, dict):
+        if name in TRANSPARENT and isinstance(spec, dict):
             spec = {k: v for k, v in spec.items() if k != "bg"}
         out.append(line(name, spec))
     return out
@@ -111,7 +116,7 @@ def main():
         name = "tokyonight-" + style
         lines = [
             f'" {name}, from folke/tokyonight.nvim (Apache-2.0, Copyright Folke Lemaitre)',
-            f'" extras/lua/tokyonight_{style}.lua at {commit}, with transparent = true.',
+            f'" extras/lua/tokyonight_{style}.lua at {commit}, with transparent = true and floats transparent.',
             '" Written by scripts/tokyonight.py: regenerate rather than edit.',
             "hi clear",
         ] + scheme(style, palette, groups)

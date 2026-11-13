@@ -1,11 +1,11 @@
 " tokyonight-night, from folke/tokyonight.nvim (Apache-2.0, Copyright Folke Lemaitre)
-" extras/lua/tokyonight_night.lua at cdc07ac78467a233fd62c493de29a17e0cf2b2b6, with transparent = true.
+" extras/lua/tokyonight_night.lua at cdc07ac78467a233fd62c493de29a17e0cf2b2b6, with transparent = true and floats transparent.
 " Written by scripts/tokyonight.py: regenerate rather than edit.
 hi clear
 hi Normal guifg=#c0caf5
-hi NormalFloat guifg=#c0caf5 guibg=#16161e
-hi FloatBorder guifg=#27a1b9 guibg=#16161e
-hi FloatTitle guifg=#27a1b9 guibg=#16161e
+hi NormalFloat guifg=#c0caf5
+hi FloatBorder guifg=#27a1b9
+hi FloatTitle guifg=#27a1b9
 hi NonText guifg=#545c7e
 hi EndOfBuffer guifg=#1a1b26
 hi Conceal guifg=#737aa2
