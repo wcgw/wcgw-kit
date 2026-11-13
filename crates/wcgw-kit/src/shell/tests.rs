@@ -807,3 +807,26 @@ fn the_mouse_is_captured_from_the_start_and_set_mouse_lets_it_go() {
     assert_eq!(toy.screen().cursor, (0, 0), "ignored");
     assert_eq!(toy.press(":set mouse=a<CR>"), [Effect::CaptureMouse(true)]);
 }
+
+#[test]
+fn a_span_s_own_colours_go_over_its_group_s() {
+    use ratatui::style::{Color, Style};
+    let mut toy = toy(40, 8);
+    let mut doc = Document::new();
+    doc.push_back(
+        "a",
+        vec![Line::Text(vec![
+            Span::new("red", Group::UNDERLINED).with_style(Style::new().fg(Color::Rgb(255, 0, 0))),
+        ])],
+    );
+    *toy.kit.current_doc_mut() = doc;
+
+    let style = toy.style_at(0, 0);
+
+    assert_eq!(style.fg, Some(Color::Rgb(255, 0, 0)), "the span's own");
+    assert_eq!(
+        style.add_modifier,
+        toy.kit.style(Group::UNDERLINED).add_modifier,
+        "the rest the group's"
+    );
+}

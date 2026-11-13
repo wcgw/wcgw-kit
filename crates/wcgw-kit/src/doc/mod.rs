@@ -142,6 +142,8 @@ pub struct Span<T> {
     pub target: Option<T>,
     /// Where the picture this span makes space for is, if it does (see [`Span::picture`]).
     pub picture: Option<String>,
+    /// Colours of its own over its group's, such as an author's in a mail, or a heat map's: content, not theme.
+    pub style: Option<ratatui::style::Style>,
 }
 
 impl<T> Span<T> {
@@ -152,6 +154,7 @@ impl<T> Span<T> {
             group,
             target: None,
             picture: None,
+            style: None,
         }
     }
 
@@ -162,6 +165,15 @@ impl<T> Span<T> {
         Self {
             picture: Some(source.into()),
             ..Self::new("\u{2800}".repeat(usize::from(cols)), Group::NORMAL)
+        }
+    }
+
+    /// The same span, drawn in `style` over its group's: colours that are the content's own, not the theme's.
+    #[must_use]
+    pub fn with_style(self, style: ratatui::style::Style) -> Self {
+        Self {
+            style: Some(style),
+            ..self
         }
     }
 
@@ -373,6 +385,7 @@ struct Run<T> {
     target: Option<T>,
     /// Where the picture drawn over the span's text is, for a span made by [`Span::picture`].
     picture: Option<String>,
+    style: Option<ratatui::style::Style>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -407,6 +420,7 @@ impl<T> Shaped<T> {
                 group: span.group,
                 target: span.target,
                 picture: span.picture,
+                style: span.style,
             });
         }
         let graphemes = text

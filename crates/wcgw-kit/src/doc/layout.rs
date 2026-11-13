@@ -292,6 +292,15 @@ impl<'d, T> Layout<'d, T> {
     /// The text shown on `row`, left to right, as runs of one highlight group. Spaces hanging off the row's edge
     /// are included; an empty row yields nothing.
     pub fn segments(&self, row: usize) -> impl Iterator<Item = (&'d str, Group)> + use<'d, T> {
+        self.styled_segments(row)
+            .map(|(text, group, _)| (text, group))
+    }
+
+    /// As [`Layout::segments`], with the colours of its own each run has over its group's, if any.
+    pub fn styled_segments(
+        &self,
+        row: usize,
+    ) -> impl Iterator<Item = (&'d str, Group, Option<ratatui::style::Style>)> + use<'d, T> {
         let Row {
             line,
             start,
@@ -309,7 +318,7 @@ impl<'d, T> Layout<'d, T> {
         shaped.runs.iter().filter_map(move |run| {
             let (lo, hi) = (run_start.max(from), run.end.min(to));
             run_start = run.end;
-            (lo < hi).then(|| (&shaped.text[lo..hi], run.group))
+            (lo < hi).then(|| (&shaped.text[lo..hi], run.group, run.style))
         })
     }
 

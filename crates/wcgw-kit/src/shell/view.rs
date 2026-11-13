@@ -221,8 +221,11 @@ impl<A: App> Kit<A> {
                 if row < layout.row_count() {
                     Line::from(
                         layout
-                            .segments(row)
-                            .map(|(text, group)| Span::styled(text, self.theme.style(group)))
+                            .styled_segments(row)
+                            .map(|(text, group, own)| {
+                                let style = self.theme.style(group);
+                                Span::styled(text, own.map_or(style, |own| style.patch(own)))
+                            })
                             .collect::<Vec<_>>(),
                     )
                 } else {
