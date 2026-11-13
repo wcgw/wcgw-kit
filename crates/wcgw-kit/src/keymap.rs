@@ -976,7 +976,7 @@ fn builtins(leader: Key) -> HashMap<Mode, Table> {
         let newer = Target::Action(Action::JumpNewer);
         bind(&mut normal, notation, newer, "jump forward", Topic::JUMPING);
     }
-    let commands: [(&str, &str, &str, Topic); 27] = [
+    let commands: [(&str, &str, &str, Topic); 32] = [
         ("<F1>", "help", "help", Topic::SEARCHING),
         (
             "<Esc>",
@@ -1011,6 +1011,22 @@ fn builtins(leader: Key) -> HashMap<Mode, Table> {
             "find buffer",
             Topic::BUFFERS,
         ),
+        // `<leader>f` finds, as fzf-lua's maps in the author's Neovim: buffers, help, keymaps, commands, jumps.
+        ("<leader>fb", "pick buffers", "find buffer", Topic::BUFFERS),
+        ("<leader>fh", "pick help", "find help", Topic::SEARCHING),
+        (
+            "<leader>fk",
+            "pick keymaps",
+            "find a key, to run",
+            Topic::SEARCHING,
+        ),
+        (
+            "<leader>fC",
+            "pick commands",
+            "find a command",
+            Topic::SEARCHING,
+        ),
+        ("<leader>fj", "pick jumps", "find a jump", Topic::JUMPING),
         ("q", "quit", "close window", Topic::WINDOWS),
         ("<C-w>h", "wincmd h", "window left", Topic::WINDOWS),
         ("<C-w>j", "wincmd j", "window below", Topic::WINDOWS),

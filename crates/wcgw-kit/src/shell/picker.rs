@@ -35,6 +35,9 @@ const MAX_ROWS: u16 = 12;
 /// What the query follows.
 const PROMPT: &str = "> ";
 
+/// The kit's pickers, as `:pick` names them.
+const BUILT_IN_PICKERS: [&str; 5] = ["buffers", "help", "keymaps", "commands", "jumps"];
+
 /// Something a picker can open.
 #[derive(Debug, Clone)]
 pub struct Choice<T> {
@@ -53,6 +56,11 @@ pub enum Pick<T> {
     Buffer(BufferId),
     /// What the target refers to, as [`App::open`] opens it.
     Target(T),
+    /// A command line, run as `:` runs it: `help gx`.
+    Ex(String),
+    /// Keys, typed in Normal mode as a map's are, `<leader>` and all: a binding's keys, or `:` and a command to finish
+    /// typing.
+    Keys(String),
 }
 
 /// What a search does: asks for what the query finds, to come back through [`Picker::found`].
@@ -382,8 +390,8 @@ impl<A: App> Kit<A> {
         let (list, query) = crate::ex::required(args)?
             .split_once(' ')
             .map_or((args, ""), |(list, query)| (list, query.trim_start()));
-        let picker = if list == "buffers" {
-            self.buffer_picker()
+        let picker = if let Some(picker) = self.builtin_picker(list) {
+            picker
         } else {
             let make = self
                 .pickers
@@ -408,10 +416,111 @@ impl<A: App> Kit<A> {
 
     /// The names `:pick` takes.
     pub(super) fn picker_names(&self) -> Vec<String> {
-        std::iter::once("buffers")
+        BUILT_IN_PICKERS
+            .iter()
+            .copied()
             .chain(self.pickers.iter().map(|(name, _)| *name))
             .map(str::to_owned)
             .collect()
+    }
+
+    /// The kit's picker called `name`, if it's one: what `<leader>f` and a key find, as fzf-lua's do.
+    fn builtin_picker(&self, name: &str) -> Option<Picker<A>> {
+        Some(match name {
+            "buffers" => self.buffer_picker(),
+            "help" => self.binding_picker("Help", |keys| Pick::Ex(format!("help {keys}"))),
+            "keymaps" => self.binding_picker("Keymaps", |keys| Pick::Keys(keys.to_owned())),
+            "commands" => self.command_picker(),
+            "jumps" => self.jump_picker(),
+            _ => return None,
+        })
+    }
+
+    /// The Normal-mode bindings, keys and what each does, to `pick` one: open `:help` at it, or run it.
+    fn binding_picker(
+        &self,
+        title: &'static str,
+        pick: impl Fn(&str) -> Pick<A::Target>,
+    ) -> Picker<A> {
+        let listing = self.keymap.listing(crate::keymap::Mode::Normal);
+        let width = listing
+            .iter()
+            .map(|listed| listed.keys.width())
+            .max()
+            .unwrap_or(0)
+            + 2;
+        let choices = listing
+            .into_iter()
+            .map(|listed| Choice {
+                label: vec![
+                    (format!("{:width$}", listed.keys), Group::WHICH_KEY),
+                    (listed.description.clone(), Group::WHICH_KEY_DESC),
+                ],
+                text: format!("{} {}", listed.keys, listed.description),
+                pick: pick(&listed.keys),
+            })
+            .collect();
+        Picker::list(title, choices, "No matching key")
+    }
+
+    /// The commands, the kit's and the application's, with what each does: picking one types it after `:`, to finish
+    /// and run.
+    fn command_picker(&self) -> Picker<A> {
+        let listing = self.commands.listing();
+        let width = listing
+            .iter()
+            .map(|(name, _)| name.width())
+            .max()
+            .unwrap_or(0)
+            + 3;
+        let choices = listing
+            .into_iter()
+            .map(|(name, help)| Choice {
+                label: vec![
+                    (format!("{:width$}", format!(":{name}")), Group::WHICH_KEY),
+                    (help.to_owned(), Group::WHICH_KEY_DESC),
+                ],
+                text: format!("{name} {help}"),
+                pick: Pick::Keys(format!(":{name}<Space>")),
+            })
+            .collect();
+        Picker::list("Commands", choices, "No matching command")
+    }
+
+    /// The current window's jumplist, newest first, to jump back or forward to one, as `<C-o>` and `<C-i>` do.
+    fn jump_picker(&self) -> Picker<A> {
+        let area = self.window_area();
+        let window = self.windows.current();
+        let (jumps, at) = window.jumplist();
+        let choices = jumps
+            .iter()
+            .enumerate()
+            .rev()
+            .filter(|&(i, _)| i != at)
+            .map(|(i, jump)| {
+                let layout = window.layout_of(&self.buffers, jump.buffer, area);
+                let shown = jump.cursor.screen(&layout);
+                let text: String = if jump.buffer == window.buffer {
+                    layout.segments(shown.row).map(|(text, _)| text).collect()
+                } else {
+                    self.buffers[jump.buffer.0].name.clone()
+                };
+                let keys = if i < at {
+                    format!("{}<C-o>", at - i)
+                } else {
+                    format!("{}<C-i>", i - at)
+                };
+                Choice {
+                    label: vec![
+                        (format!("{:5} ", shown.row + 1), Group::COMMENT),
+                        (text.trim().to_owned(), Group::NORMAL_FLOAT),
+                    ],
+                    text,
+                    pick: Pick::Keys(keys),
+                }
+            })
+            .collect();
+        Picker::list("Jumps", choices, "No jumps")
     }
 
     fn buffer_picker(&self) -> Picker<A> {
@@ -510,6 +619,12 @@ impl<A: App> Kit<A> {
                             Vec::new()
                         }
                     },
+                    Some(Pick::Ex(line)) => self.ex(app, &line),
+                    Some(Pick::Keys(notation)) => {
+                        let keys = crate::key::parse_keys(&notation, self.keymap.leader());
+                        let ran = self.keymap.replay(self.keymap_mode(), &keys, true);
+                        self.run_all(app, ran)
+                    }
                     None => Vec::new(),
                 }
             }

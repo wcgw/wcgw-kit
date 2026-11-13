@@ -290,7 +290,10 @@ fn tab_completes_the_application_s_commands_and_their_arguments() {
     let edits = toy.kit.ex_completions(&toy.app, "e page/");
     assert_eq!(edits.candidates, ["page/a", "page/b", "page/home"]);
     let pickers = toy.kit.ex_completions(&toy.app, "pick ");
-    assert_eq!(pickers.candidates, ["buffers", "people"]);
+    assert_eq!(
+        pickers.candidates,
+        ["buffers", "commands", "help", "jumps", "keymaps", "people"]
+    );
 }
 
 #[test]
@@ -373,6 +376,50 @@ fn shell_and_bang_run_a_command_with_the_terminal_and_alone_ask_which() {
     assert!(
         matches!(effects.as_slice(), [Effect::Shell(shell)] if !shell.wait && shell.stdin.is_none()),
         "{effects:?}"
+    );
+}
+
+/// Whether `text` is on screen.
+fn shown(toy: &Harness<Toy>, text: &str) -> bool {
+    toy.screen().rows.iter().any(|row| row.contains(text))
+}
+
+#[test]
+fn leader_f_finds_buffers_help_keys_commands_and_jumps() {
+    let mut toy = toy(60, 20);
+    let _ = toy.press(":e page/x<CR>");
+
+    let _ = toy.press("<Space>fb");
+    assert!(shown(&toy, "Buffers"), "{:#?}", toy.screen().rows);
+    let _ = toy.press("<Esc>");
+
+    // A key, found by what it does, runs.
+    let _ = toy.press("<Space>fkprevious buffer<CR>");
+    assert_eq!(toy.kit.buffer(toy.kit.current_buffer()).name(), "page/home");
+
+    // Help opens at it.
+    let _ = toy.press("<Space>fhnext buffer<CR>");
+    assert!(
+        shown(&toy, "NORMAL  help") && shown(&toy, "next buffer                :bnext"),
+        "{:#?}",
+        toy.screen().rows
+    );
+    let _ = toy.press(":only<CR>");
+
+    // A command is typed after :, to finish.
+    let _ = toy.press("<Space>fCask something<CR>");
+    assert_eq!(cmdline(&toy), ":ask");
+    let _ = toy.press("<CR>");
+    assert_eq!(cmdline(&toy), "Sure? (y/n)", "run once finished");
+    let _ = toy.press("n");
+
+    // A jump goes back.
+    let _ = toy.press("G");
+    let _ = toy.press("<Space>fj<CR>");
+    assert_eq!(
+        toy.screen().cursor.1,
+        1,
+        "back on the first row, under the tabline"
     );
 }
 
