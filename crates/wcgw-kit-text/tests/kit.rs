@@ -70,6 +70,45 @@ fn a_link_s_text_and_number_open_it_even_wrapped() {
 }
 
 #[test]
+fn lines_shaded_after_their_links_are_found_still_open_them() {
+    let document = Document::html(
+        "<p>See <a href=\"https://x.example\">the page</a> now.</p>",
+        &Styles::default(),
+    );
+    let rendering = render(&document);
+    let shade = Style::new().fg(Color::Black).bg(Color::Red);
+
+    let mut lines = kit::linked_lines(
+        &document,
+        &rendering,
+        |_| String::new(),
+        |_, link| Some(link.url.clone()),
+    );
+    for line in &mut lines {
+        if let wcgw_kit::doc::Line::Text(spans) = line {
+            for span in spans {
+                span.style = Some(span.style.unwrap_or_default().patch(shade));
+            }
+        }
+    }
+    let mut shaded = wcgw_kit::doc::Document::new();
+    shaded.push_back("body", wcgw_kit::doc::Content::from(lines));
+
+    let layout = Layout::new(&shaded, WIDTH);
+    let col = |needle: &str| {
+        let text: String = layout.segments(0).map(|(text, _)| text).collect();
+        text.find(needle).expect(needle)
+    };
+    let opened = |needle| {
+        Cursor::at_screen(&layout, 0, col(needle))
+            .target(&layout)
+            .cloned()
+    };
+    assert_eq!(opened("page"), Some("https://x.example".to_owned()));
+    assert_eq!(opened("See"), None);
+}
+
+#[test]
 fn a_plain_address_opens_itself_cut_across_lines() {
     let document = Document::plain(
         "Go to https://example.com/a/very/long/path now",
