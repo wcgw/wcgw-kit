@@ -407,6 +407,10 @@ Each app ends each milestone runnable, on its `wcgw-kit` branch.
 ### M8 Publishing
 
 - [ ] Push `wcgw/wcgw-kit`; the apps pin a git revision; CI green on all four.
+  - [x] Pushed, and tagged `v0.1.0` (88762d4) by the author; the four apps build from the tag (devnull 5a6e3e9, ghd
+    e200c2c, muttrs 9423f2f, slackers 847c3d7), each tested on it.
+  - [ ] voight's `wcgw-kit` branch pushed: ghd and muttrs still pin it in a local checkout (`file://`).
+  - [ ] CI green on all four: not checked.
 
 ## Implementation notes
 
