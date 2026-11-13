@@ -38,6 +38,8 @@ struct Toy {
     unread: u64,
     /// The window `:open` shows pages in, when not the current one: a main window beside a sidebar.
     open_in: Option<WindowId>,
+    /// Whether `:q` waits for the toy to quit by itself.
+    busy: bool,
 }
 
 impl App for Toy {
@@ -84,6 +86,14 @@ impl App for Toy {
             .unwrap_or_else(|| kit.add_buffer(name, page(name), true));
         kit.show_buffer(id);
         Ok(Vec::new())
+    }
+
+    fn quit(&mut self, _kit: &mut Kit<Self>) -> crate::app::Quitting {
+        if self.busy {
+            crate::app::Quitting::Later
+        } else {
+            crate::app::Quitting::Now
+        }
     }
 
     fn edit_names(&self, _kit: &Kit<Self>) -> Vec<String> {
@@ -1013,10 +1023,44 @@ fn defaults_bound_to_keys_run_them_and_folds_answer_the_application() {
     );
     *toy.kit.current_doc_mut() = doc;
     let _ = toy.press("gg");
+    assert!(!toy.kit.on_closed_fold());
     toy.kit.fold(None, false);
     assert_eq!(toy.screen().rows[1], "folded");
+    let _ = toy.press("j");
+    assert!(toy.kit.on_closed_fold());
     toy.kit.fold(None, true);
     assert_eq!(toy.screen().rows[1], "hidden");
+    assert!(!toy.kit.on_closed_fold());
+}
+
+#[test]
+fn quitting_waits_for_an_application_that_asks_but_not_with_a_bang() {
+    let mut toy = toy(40, 8);
+    let quits = |effects: &Effects<Toy>| effects.iter().any(|e| matches!(e, Effect::Quit));
+
+    assert!(quits(&toy.press(":q<CR>")));
+    toy.app.busy = true;
+    assert!(!quits(&toy.press(":q<CR>")));
+    assert!(!quits(&toy.press(":qa<CR>")));
+    assert!(quits(&toy.press(":qa!<CR>")));
+}
+
+#[test]
+fn pictures_in_view_are_asked_for_from_the_start_and_graphics_says_how() {
+    let mut toy = toy(40, 8);
+    let _ = toy.kit.set_graphics(Graphics::HalfBlocks);
+    pictured(&mut toy, "a.png", 20, 2);
+
+    let effects = toy.kit.start(&mut toy.app);
+
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::Picture { .. }))
+    );
+    assert_eq!(toy.kit.graphics(), Graphics::HalfBlocks);
+    let _ = toy.press(":set graphics=off<CR>");
+    assert_eq!(toy.kit.graphics(), Graphics::Off);
 }
 
 #[test]

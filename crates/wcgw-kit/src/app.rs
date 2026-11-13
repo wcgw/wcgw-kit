@@ -92,11 +92,27 @@ pub trait App: Sized + 'static {
         Vec::new()
     }
 
+    /// `:q` on the last window, or `:qa`: whether to quit now, or later, once what the application has on its way is
+    /// done, when it sends [`Effect::Quit`] itself. `:qa!` quits without asking.
+    fn quit(&mut self, kit: &mut Kit<Self>) -> Quitting {
+        let _ = kit;
+        Quitting::Now
+    }
+
     /// The terminal gained (`true`) or lost focus.
     fn focus(&mut self, kit: &mut Kit<Self>, focused: bool) -> Effects<Self> {
         let _ = (kit, focused);
         Vec::new()
     }
+}
+
+/// When to quit, as [`App::quit`] says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Quitting {
+    /// Now.
+    Now,
+    /// Once the application sends [`Effect::Quit`].
+    Later,
 }
 
 /// What the kit and application ask the runtime to do.

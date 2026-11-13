@@ -373,6 +373,21 @@ impl<A: App> Kit<A> {
         self.cell_size
     }
 
+    /// How pictures are drawn now, as `:set graphics=` last said: an application may leave out the room of pictures
+    /// that won't be drawn.
+    #[must_use]
+    pub fn graphics(&self) -> Graphics {
+        self.options.graphics
+    }
+
+    /// Whether the cursor of the current window is on the summary of a closed fold.
+    #[must_use]
+    pub fn on_closed_fold(&self) -> bool {
+        let layout = self.current_layout();
+        let row = self.windows.current().cursor.screen(&layout).row;
+        row < layout.row_count() && layout.is_folded(row)
+    }
+
     /// Whether the terminal has focus.
     #[must_use]
     pub fn is_focused(&self) -> bool {
@@ -833,6 +848,7 @@ impl<A: App> Kit<A> {
         }
         effects.extend(app.start(self));
         effects.extend(self.notify_shown(app));
+        effects.extend(self.pictures_in_view());
         effects
     }
 
@@ -1476,12 +1492,15 @@ impl<A: App> Kit<A> {
         bang: bool,
         args: &str,
     ) -> Result<Effects<A>, String> {
-        let _ = bang;
         match builtin {
             Builtin::Quit if self.windows.count() > 1 => {
                 self.windows.close();
             }
             Builtin::Quit | Builtin::QuitAll => {
+                if !bang && app.quit(self) == crate::app::Quitting::Later {
+                    // The application quits once it is ready, with Effect::Quit; `:qa!` doesn't wait.
+                    return Ok(Vec::new());
+                }
                 let mut effects = self.pictures.clear();
                 effects.push(Effect::Quit);
                 return Ok(effects);

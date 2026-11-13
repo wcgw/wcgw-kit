@@ -142,7 +142,8 @@ async fn run_loop<A: App, P: Perform<A>>(
     kit.number_pictures_from(first_picture_id());
     measure_cells(kit);
     let size = terminal.size()?;
-    let _ = kit.update(
+    // Performed with the start's, once there is what performs them.
+    let sized = kit.update(
         app,
         Msg::Resize {
             width: size.width,
@@ -188,7 +189,7 @@ async fn run_loop<A: App, P: Perform<A>>(
         animates: facts.animates,
     };
     let perform = |effect, performer: &mut P| perform(effect, &inbox, performer, &pictures);
-    for effect in kit.start(app) {
+    for effect in sized.into_iter().chain(kit.start(app)) {
         if let Step::Quit = perform(effect, &mut performer)? {
             return Ok(());
         }
