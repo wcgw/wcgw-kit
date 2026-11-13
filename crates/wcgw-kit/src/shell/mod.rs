@@ -4,6 +4,7 @@
 mod cmdline;
 mod commands;
 mod complete;
+mod composer;
 mod confirm;
 mod help;
 mod hover;
@@ -17,6 +18,7 @@ mod view;
 mod window;
 mod windows;
 
+use std::collections::HashMap;
 use std::fmt;
 use std::time::Duration;
 
@@ -35,6 +37,7 @@ use cmdline::{Cmdline, Edit, Purpose};
 use commands::{Builtin, Commands, Found};
 pub use commands::{Command, Complete, Invocation, Run};
 pub use complete::Completions;
+pub use composer::{Composer, Suggestion, Word};
 use confirm::Confirm;
 use options::Options;
 pub use picker::{Choice, Pick, Picker};
@@ -98,6 +101,8 @@ enum Mode_<A: App> {
     Picker(Picker<A>),
     /// A question in the command line, answered by the next key.
     Confirm(Confirm<A>),
+    /// Typing into the composer of a buffer.
+    Insert(BufferId),
 }
 
 /// A line for the command line area.
@@ -164,8 +169,10 @@ pub struct Kit<A: App> {
     pickers: Vec<(&'static str, picker::Make<A>)>,
     /// Buffers shown in a window since the application last heard, for [`App::shown`].
     shown: Vec<BufferId>,
-    /// Whether the editor open now was opened by the kit, rather than by the application.
-    editor_ours: bool,
+    /// The buffer whose composer the editor open now was opened from, rather than by the application.
+    editor_ours: Option<BufferId>,
+    /// The buffers' composers.
+    composers: HashMap<BufferId, Composer<A>>,
 }
 
 impl<A: App> fmt::Debug for Kit<A> {
@@ -212,7 +219,8 @@ impl<A: App> Kit<A> {
             segments: Vec::new(),
             pickers: Vec::new(),
             shown: Vec::new(),
-            editor_ours: false,
+            editor_ours: None,
+            composers: HashMap::new(),
         }
     }
 
@@ -577,11 +585,17 @@ impl<A: App> Kit<A> {
                     Vec::new()
                 }
                 Mode_::Picker(_) => self.picker_paste(app, &text),
+                Mode_::Insert(id) => {
+                    let id = *id;
+                    self.insert_paste(app, id, &text);
+                    Vec::new()
+                }
                 _ => Vec::new(),
             },
             Msg::Sourced { path, contents } => self.source(app, &path, contents),
             Msg::Edited(saved) => {
-                if std::mem::take(&mut self.editor_ours) {
+                if let Some(id) = self.editor_ours.take() {
+                    self.composer_edited(id, saved);
                     Vec::new()
                 } else {
                     app.edited(self, saved)
@@ -641,6 +655,10 @@ impl<A: App> Kit<A> {
             }
             Mode_::Picker(_) => self.picker_key(app, key),
             Mode_::Confirm(_) => self.confirm_key(app, key),
+            Mode_::Insert(id) => {
+                let id = *id;
+                self.insert_key(app, id, key)
+            }
             Mode_::Cmdline(cmdline) => {
                 let history: &[String] = match cmdline.purpose {
                     Purpose::Ex => &self.ex_history,
@@ -1080,9 +1098,11 @@ impl<A: App> Kit<A> {
                 let ran = self.keymap.replay(self.keymap_mode(), &[key], remap);
                 self.run_all(app, ran)
             }
-            Mode_::Cmdline(_) | Mode_::MorePrompt { .. } | Mode_::Picker(_) | Mode_::Confirm(_) => {
-                self.key(app, key)
-            }
+            Mode_::Cmdline(_)
+            | Mode_::MorePrompt { .. }
+            | Mode_::Picker(_)
+            | Mode_::Confirm(_)
+            | Mode_::Insert(_) => self.key(app, key),
         }
     }
 
@@ -1242,6 +1262,7 @@ impl<A: App> Kit<A> {
             Builtin::Jumps => self.list_jumps(),
             Builtin::Nohlsearch => self.highlighting = false,
             Builtin::Pick => return self.pick(app, args),
+            Builtin::StartInsert => self.start_insert()?,
         }
         Ok(Vec::new())
     }
@@ -1381,15 +1402,21 @@ impl<A: App> Kit<A> {
             .into_iter()
             .find(|(id, _)| *id == current)
             .map(|(_, rect)| rect);
-        self.text_area(rect.unwrap_or_default(), area)
+        self.text_area(
+            rect.unwrap_or_default(),
+            area,
+            self.windows.current().buffer,
+        )
     }
 
-    /// A window's text area: all of `rect` but its last row, for its statusline, or with a global statusline
-    /// (`'laststatus'` 3) for the line separating it from the window below, when there is one.
-    fn text_area(&self, rect: Rect, windows: Rect) -> Rect {
+    /// A window's text area, showing `buffer`: all of `rect` but its last row, for its statusline, or with a global
+    /// statusline (`'laststatus'` 3) for the line separating it from the window below, when there is one; and but
+    /// the rows of the buffer's composer, when it shows.
+    fn text_area(&self, rect: Rect, windows: Rect, buffer: BufferId) -> Rect {
         let bar = self.options.laststatus != 3 || rect.bottom() < windows.bottom();
+        let below = u16::from(bar) + self.composer_rows(buffer);
         Rect {
-            height: rect.height.saturating_sub(u16::from(bar)),
+            height: rect.height.saturating_sub(below),
             ..rect
         }
     }

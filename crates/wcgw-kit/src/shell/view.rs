@@ -147,7 +147,7 @@ impl<A: App> Kit<A> {
                 ));
                 return;
             }
-            Mode_::Normal | Mode_::Visual(_) => {}
+            Mode_::Normal | Mode_::Visual(_) | Mode_::Insert(_) => {}
         }
         if let Some(message) = &self.message {
             let group = match message.kind {
@@ -168,6 +168,7 @@ impl<A: App> Kit<A> {
 
     /// Draws `window` in `rect`, its statusline (or the line under it) on the last row, and returns where its cursor
     /// is.
+    #[allow(clippy::too_many_lines)] // One layer of the window after another.
     fn render_window(
         &self,
         app: &A,
@@ -177,7 +178,7 @@ impl<A: App> Kit<A> {
         is_current: bool,
     ) -> Position {
         let windows_area = self.windows_area();
-        let area = self.text_area(rect, windows_area);
+        let area = self.text_area(rect, windows_area, window.buffer);
         let viewport = Viewport {
             height: usize::from(area.height),
             scrolloff: self.options.scrolloff,
@@ -255,10 +256,20 @@ impl<A: App> Kit<A> {
             }
         }
 
+        let composer_rows = self.composer_rows(window.buffer);
+        let mut typed_at = None;
+        if composer_rows > 0 {
+            let composer = Rect::new(rect.x, area.bottom(), rect.width, composer_rows);
+            typed_at = self.render_composer(frame, window.buffer, composer);
+        }
+        let area_with_composer = Rect {
+            height: area.height + composer_rows,
+            ..area
+        };
         if self.options.laststatus == 3 {
-            if area.bottom() < rect.bottom() {
+            if area_with_composer.bottom() < rect.bottom() {
                 // The line between this window and the one below.
-                let line = Rect::new(rect.x, area.bottom(), rect.width, 1);
+                let line = Rect::new(rect.x, area_with_composer.bottom(), rect.width, 1);
                 let bar = "─".repeat(usize::from(rect.width));
                 frame.render_widget(
                     Paragraph::new(bar).style(self.theme.style(Group::WIN_SEPARATOR)),
@@ -266,10 +277,13 @@ impl<A: App> Kit<A> {
                 );
             }
         } else {
-            let status_area = Rect::new(rect.x, area.bottom(), rect.width, 1);
+            let status_area = Rect::new(rect.x, area_with_composer.bottom(), rect.width, 1);
             self.render_statusline(app, frame, window, area, status_area, is_current);
         }
 
+        if let (true, Some(at)) = (is_current, typed_at) {
+            return at;
+        }
         let cursor = window.cursor.screen(&layout);
         let x = area.x.saturating_add(to_u16(cursor.col));
         let y = area
@@ -342,6 +356,7 @@ impl<A: App> Kit<A> {
             Mode_::Cmdline(_) => ("COMMAND", Group::STATUS_LINE_MODE_COMMAND),
             // As Telescope's prompt, typed into.
             Mode_::Picker(_) => ("INSERT", Group::STATUS_LINE_MODE_COMMAND),
+            Mode_::Insert(_) => ("INSERT", Group::STATUS_LINE_MODE_INSERT),
         }
     }
 

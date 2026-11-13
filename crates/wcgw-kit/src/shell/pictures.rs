@@ -369,7 +369,7 @@ impl<A: App> Kit<A> {
         let mut wanted: Vec<Key> = Vec::new();
         for &(id, rect) in &arrangement.windows {
             let window = self.windows.get(id);
-            let area = self.text_area(rect, self.windows_area());
+            let area = self.text_area(rect, self.windows_area(), window.buffer);
             let layout = window.layout(&self.buffers, area);
             let viewport = super::Viewport {
                 height: usize::from(area.height),

@@ -1,0 +1,569 @@
+//! The composer (D4): the one editable thing, a text area docked under a window showing its buffer, for writing
+//! what an application sends, such as a chat message. Insert mode types into it with readline keys; `<Esc>` leaves;
+//! `<C-x><C-e>` hands the text to `$EDITOR`. The application completes words as they are typed: it says what a word
+//! may become, the kit shows them in a menu and puts the one chosen in place.
+
+use std::fmt;
+use std::rc::Rc;
+
+use ratatui::Frame;
+use ratatui::layout::{Position, Rect};
+use ratatui::style::{Modifier, Style};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui_textarea::{CursorMove, Input, Key as TextKey, TextArea};
+use unicode_width::UnicodeWidthStr;
+
+use super::{Kit, Mode_};
+use crate::app::{App, BufferId, Effect, Effects};
+use crate::hl::Group;
+use crate::key::{Code, Key, Mods};
+
+/// The most lines a composer shows; longer text scrolls in it.
+const MAX_LINES: u16 = 8;
+
+/// The most suggestions shown at once.
+const MENU_ROWS: usize = 8;
+
+/// What sending does with the text: the application posts it.
+pub type Send<A> = Rc<dyn Fn(&mut A, &mut Kit<A>, BufferId, String) -> Effects<A>>;
+
+/// What the word before the cursor may be completed to, as the application sees it; empty for none.
+pub type CompleteWord<A> = Rc<dyn Fn(&A, &Kit<A>, BufferId, &Word<'_>) -> Vec<Suggestion>>;
+
+/// What the application does when a suggestion is put in place, such as remembering whom an @-mention names.
+pub type Accepted<A> = Rc<dyn Fn(&mut A, &mut Kit<A>, BufferId, &Suggestion) -> Effects<A>>;
+
+/// The word before the cursor, as completion sees it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Word<'a> {
+    /// The word: from the last blank before the cursor to it.
+    pub text: &'a str,
+    /// Whether it is the first word of the text, as a slash command is.
+    pub first: bool,
+}
+
+/// Something a word may be completed to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Suggestion {
+    /// How the menu lists it.
+    pub label: Vec<(String, Group)>,
+    /// What replaces the word when it is chosen.
+    pub insert: String,
+    /// What the application knows it by, to tell which was chosen.
+    pub key: String,
+}
+
+/// A composer of a buffer: its text, and what the application does with it.
+pub struct Composer<A: App> {
+    area: TextArea<'static>,
+    placeholder: String,
+    title: Option<String>,
+    always: bool,
+    enter_sends: bool,
+    send: Option<Send<A>>,
+    complete: Option<CompleteWord<A>>,
+    accepted: Option<Accepted<A>>,
+    /// What the word before the cursor may become, while it may become something.
+    suggestions: Vec<Suggestion>,
+    selected: usize,
+    /// Whether `<C-x>` was typed, waiting for `<C-e>`.
+    ctrl_x: bool,
+}
+
+impl<A: App> fmt::Debug for Composer<A> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Composer")
+            .field("text", &self.text())
+            .field("suggestions", &self.suggestions)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<A: App> Composer<A> {
+    /// An empty composer saying `placeholder` while empty; `<CR>` sends.
+    #[must_use]
+    pub fn new(placeholder: impl Into<String>) -> Self {
+        let placeholder = placeholder.into();
+        Self {
+            area: text_area("", &placeholder),
+            placeholder,
+            title: None,
+            always: false,
+            enter_sends: true,
+            send: None,
+            complete: None,
+            accepted: None,
+            suggestions: Vec::new(),
+            selected: 0,
+            ctrl_x: false,
+        }
+    }
+
+    /// Shown under its buffer even when empty and not typed into, as a chat's is.
+    #[must_use]
+    pub fn always_shown(self) -> Self {
+        Self {
+            always: true,
+            ..self
+        }
+    }
+
+    /// `<CR>` breaks the line rather than sending; `<C-s>` sends.
+    #[must_use]
+    pub fn enter_breaks_lines(self) -> Self {
+        Self {
+            enter_sends: false,
+            ..self
+        }
+    }
+
+    /// Sends with `send`.
+    #[must_use]
+    pub fn on_send(
+        self,
+        send: impl Fn(&mut A, &mut Kit<A>, BufferId, String) -> Effects<A> + 'static,
+    ) -> Self {
+        Self {
+            send: Some(Rc::new(send)),
+            ..self
+        }
+    }
+
+    /// Completes the word before the cursor with what `complete` suggests, telling `accepted` which was chosen.
+    #[must_use]
+    pub fn completing(
+        self,
+        complete: impl Fn(&A, &Kit<A>, BufferId, &Word<'_>) -> Vec<Suggestion> + 'static,
+        accepted: impl Fn(&mut A, &mut Kit<A>, BufferId, &Suggestion) -> Effects<A> + 'static,
+    ) -> Self {
+        Self {
+            complete: Some(Rc::new(complete)),
+            accepted: Some(Rc::new(accepted)),
+            ..self
+        }
+    }
+
+    /// Its text, lines joined by `\n`.
+    #[must_use]
+    pub fn text(&self) -> String {
+        self.area.lines().join("\n")
+    }
+
+    /// Whether it holds no text.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.area.is_empty()
+    }
+
+    /// Replaces its text with `text`, the cursor at the end.
+    pub fn set_text(&mut self, text: &str) {
+        self.area = text_area(text, &self.placeholder);
+        self.suggestions.clear();
+    }
+
+    /// What its border says, such as whom the text mentions; `None` for nothing.
+    pub fn set_title(&mut self, title: Option<String>) {
+        self.title = title;
+    }
+
+    /// What the menu suggests now.
+    #[must_use]
+    pub fn suggestions(&self) -> &[Suggestion] {
+        &self.suggestions
+    }
+
+    /// The word before the cursor, and whether it is the text's first.
+    fn word(&self) -> Option<(Word<'_>, usize)> {
+        let ratatui_textarea::DataCursor(row, col) = self.area.cursor();
+        let line = self.area.lines().get(row)?;
+        let before: String = line.chars().take(col).collect();
+        let start = before
+            .char_indices()
+            .rev()
+            .find(|(_, c)| c.is_whitespace())
+            .map_or(0, |(at, c)| at + c.len_utf8());
+        let byte_end = line
+            .char_indices()
+            .nth(col)
+            .map_or(line.len(), |(at, _)| at);
+        let text = &line[start..byte_end];
+        (!text.is_empty()).then(|| {
+            (
+                Word {
+                    text,
+                    first: row == 0 && start == 0,
+                },
+                text.chars().count(),
+            )
+        })
+    }
+
+    /// The column, in cells from the composer's left, where the word before the cursor starts.
+    fn word_column(&self) -> usize {
+        let ratatui_textarea::DataCursor(row, col) = self.area.cursor();
+        let Some(line) = self.area.lines().get(row) else {
+            return 0;
+        };
+        let before: String = line.chars().take(col).collect();
+        let start = before.rfind(char::is_whitespace).map_or(0, |at| at + 1);
+        before[..start].width()
+    }
+
+    /// Whether it shows under its buffer now: always, or while it holds text, or while `typing`.
+    fn is_shown(&self, typing: bool) -> bool {
+        self.always || typing || !self.area.is_empty()
+    }
+
+    /// The rows it takes when shown: its border and its lines.
+    fn height(&self) -> u16 {
+        let lines = u16::try_from(self.area.lines().len()).unwrap_or(u16::MAX);
+        lines.clamp(1, MAX_LINES) + 1
+    }
+}
+
+/// An empty text area saying `placeholder` while empty, holding `text` with the cursor at its end.
+fn text_area(text: &str, placeholder: &str) -> TextArea<'static> {
+    let mut area = TextArea::new(text.lines().map(str::to_owned).collect());
+    area.set_placeholder_text(placeholder);
+    area.set_cursor_line_style(Style::new());
+    area.move_cursor(CursorMove::Bottom);
+    area.move_cursor(CursorMove::End);
+    area
+}
+
+/// `key` as the text area takes it.
+fn input(key: Key) -> Input {
+    let key_of = match key.code {
+        Code::Char(c) => TextKey::Char(c),
+        Code::Enter => TextKey::Enter,
+        Code::Backspace => TextKey::Backspace,
+        Code::Delete => TextKey::Delete,
+        Code::Left => TextKey::Left,
+        Code::Right => TextKey::Right,
+        Code::Up => TextKey::Up,
+        Code::Down => TextKey::Down,
+        Code::Home => TextKey::Home,
+        Code::End => TextKey::End,
+        Code::PageUp => TextKey::PageUp,
+        Code::PageDown => TextKey::PageDown,
+        Code::Tab => TextKey::Tab,
+        Code::Esc => TextKey::Esc,
+        Code::F(n) => TextKey::F(n),
+        Code::Insert => TextKey::Null,
+    };
+    Input {
+        key: key_of,
+        ctrl: key.mods.contains(Mods::CTRL),
+        alt: key.mods.contains(Mods::ALT),
+        shift: key.mods.contains(Mods::SHIFT),
+    }
+}
+
+impl<A: App> Kit<A> {
+    /// Gives buffer `id` the composer `composer`, replacing any it had; windows showing the buffer show it docked
+    /// under its text.
+    pub fn set_composer(&mut self, id: BufferId, composer: Composer<A>) {
+        self.composers.insert(id, composer);
+    }
+
+    /// The composer of buffer `id`, if it has one.
+    #[must_use]
+    pub fn composer(&self, id: BufferId) -> Option<&Composer<A>> {
+        self.composers.get(&id)
+    }
+
+    /// The composer of buffer `id`, if it has one, to change.
+    pub fn composer_mut(&mut self, id: BufferId) -> Option<&mut Composer<A>> {
+        self.composers.get_mut(&id)
+    }
+
+    /// `:startinsert`: types into the composer of the current buffer.
+    pub(super) fn start_insert(&mut self) -> Result<(), String> {
+        let id = self.windows.current().buffer;
+        if !self.composers.contains_key(&id) {
+            return Err("Nothing to write in here".to_owned());
+        }
+        self.mode = Mode_::Insert(id);
+        Ok(())
+    }
+
+    /// Whether the composer of `id` is being typed into.
+    fn typing_in(&self, id: BufferId) -> bool {
+        matches!(self.mode, Mode_::Insert(typing) if typing == id)
+    }
+
+    /// The rows the composer of the buffer a window shows takes at its bottom, when it shows.
+    pub(super) fn composer_rows(&self, id: BufferId) -> u16 {
+        self.composers
+            .get(&id)
+            .filter(|composer| composer.is_shown(self.typing_in(id)))
+            .map_or(0, Composer::height)
+    }
+
+    /// A key typed into the composer of `id`.
+    pub(super) fn insert_key(&mut self, app: &mut A, id: BufferId, key: Key) -> Effects<A> {
+        let Some(composer) = self.composers.get_mut(&id) else {
+            self.mode = Mode_::Normal;
+            return Vec::new();
+        };
+        let ctrl = |c| Key {
+            code: Code::Char(c),
+            mods: Mods::CTRL,
+        };
+        if std::mem::take(&mut composer.ctrl_x) && key == ctrl('e') {
+            self.editor_ours = Some(id);
+            return vec![Effect::Edit {
+                text: composer.text(),
+            }];
+        }
+        let menu = !composer.suggestions.is_empty();
+        let count = composer.suggestions.len();
+        match key {
+            k if k == ctrl('x') => composer.ctrl_x = true,
+            k if k.code == Code::Esc && menu => composer.suggestions.clear(),
+            k if k.code == Code::Esc => {
+                composer.suggestions.clear();
+                self.mode = Mode_::Normal;
+            }
+            k if menu
+                && (k == ctrl('n')
+                    || k.code == Code::Down
+                    || (k.code == Code::Tab && k.mods == Mods::NONE)) =>
+            {
+                composer.selected = (composer.selected + 1) % count;
+            }
+            k if menu
+                && (k == ctrl('p')
+                    || k.code == Code::Up
+                    || (k.code == Code::Tab && k.mods == Mods::SHIFT)) =>
+            {
+                composer.selected = (composer.selected + count - 1) % count;
+            }
+            k if menu && k.code == Code::Enter && k.mods == Mods::NONE => {
+                return self.accept(app, id);
+            }
+            k if k.code == Code::Enter && k.mods == Mods::NONE && composer.enter_sends => {
+                return self.send(app, id);
+            }
+            k if k == ctrl('s') => return self.send(app, id),
+            k if k.code == Code::Enter || k == ctrl('j') => {
+                composer.area.insert_newline();
+                self.refresh_suggestions(app, id);
+            }
+            k => {
+                composer.area.input(input(k));
+                self.refresh_suggestions(app, id);
+            }
+        }
+        Vec::new()
+    }
+
+    /// Text pasted into the composer of `id`.
+    pub(super) fn insert_paste(&mut self, app: &mut A, id: BufferId, text: &str) {
+        if let Some(composer) = self.composers.get_mut(&id) {
+            composer.area.insert_str(text);
+        }
+        self.refresh_suggestions(app, id);
+    }
+
+    /// Asks the application what the word before the cursor may become.
+    fn refresh_suggestions(&mut self, app: &A, id: BufferId) {
+        let Some(composer) = self.composers.get(&id) else {
+            return;
+        };
+        let suggestions = match (&composer.complete, composer.word()) {
+            (Some(complete), Some((word, _))) => complete(app, self, id, &word),
+            _ => Vec::new(),
+        };
+        if let Some(composer) = self.composers.get_mut(&id) {
+            composer.selected = 0;
+            composer.suggestions = suggestions;
+        }
+    }
+
+    /// Asks the application again what the word before the cursor of the composer being typed in may become, as
+    /// when what it knows changed (people found, say).
+    pub fn refresh_completion(&mut self, app: &A) {
+        if let Mode_::Insert(id) = self.mode {
+            self.refresh_suggestions(app, id);
+        }
+    }
+
+    /// Puts the suggestion chosen in place of the word before the cursor.
+    fn accept(&mut self, app: &mut A, id: BufferId) -> Effects<A> {
+        let Some(composer) = self.composers.get_mut(&id) else {
+            return Vec::new();
+        };
+        let Some(chosen) = composer.suggestions.get(composer.selected).cloned() else {
+            return Vec::new();
+        };
+        if let Some((_, chars)) = composer.word() {
+            for _ in 0..chars {
+                composer.area.delete_char();
+            }
+        }
+        composer.area.insert_str(&chosen.insert);
+        composer.suggestions.clear();
+        let accepted = composer.accepted.clone();
+        accepted.map_or_else(Vec::new, |accepted| accepted(app, self, id, &chosen))
+    }
+
+    /// Sends the text of the composer of `id`, which empties it; nothing for an empty one.
+    fn send(&mut self, app: &mut A, id: BufferId) -> Effects<A> {
+        let Some(composer) = self.composers.get_mut(&id) else {
+            return Vec::new();
+        };
+        let text = composer.text();
+        if text.trim().is_empty() {
+            return Vec::new();
+        }
+        let send = composer.send.clone();
+        composer.set_text("");
+        send.map_or_else(Vec::new, |send| send(app, self, id, text))
+    }
+
+    /// The editor opened from the composer of `id` saved `saved`: it becomes the text.
+    pub(super) fn composer_edited(&mut self, id: BufferId, saved: Result<String, String>) {
+        match saved {
+            Ok(text) => {
+                if let Some(composer) = self.composers.get_mut(&id) {
+                    composer.set_text(text.trim_end_matches('\n'));
+                }
+            }
+            Err(reason) => self.error(format!("Not edited: {reason}")),
+        }
+    }
+
+    /// Draws the composer of `id` in `area`, the bottom rows of a window, and returns where the cursor goes when it
+    /// is typed into.
+    pub(super) fn render_composer(
+        &self,
+        frame: &mut Frame<'_>,
+        id: BufferId,
+        area: Rect,
+    ) -> Option<Position> {
+        let composer = self.composers.get(&id)?;
+        let typing = self.typing_in(id);
+        let border = if typing {
+            Group::STATUS_LINE_MODE_INSERT
+        } else {
+            Group::WIN_SEPARATOR
+        };
+        let mut block = Block::default()
+            .borders(Borders::TOP)
+            .border_style(self.theme.style(border));
+        if let Some(title) = &composer.title {
+            block = block.title(format!(" {title} "));
+        }
+        let inner = block.inner(area);
+        frame.render_widget(Clear, area);
+        frame.render_widget(block, area);
+        if !typing && composer.area.is_empty() {
+            frame.render_widget(
+                Paragraph::new(composer.placeholder.as_str())
+                    .style(self.theme.style(Group::COMMENT)),
+                inner,
+            );
+            return None;
+        }
+        let mut area_widget = composer.area.clone();
+        area_widget.set_style(self.theme.style(Group::NORMAL));
+        area_widget.set_placeholder_style(self.theme.style(Group::COMMENT));
+        let cursor = if typing {
+            self.theme
+                .style(Group::NORMAL)
+                .add_modifier(Modifier::REVERSED)
+        } else {
+            Style::new()
+        };
+        area_widget.set_cursor_style(cursor);
+        frame.render_widget(&area_widget, inner);
+        if !typing {
+            return None;
+        }
+        let ratatui_textarea::DataCursor(row, col) = composer.area.cursor();
+        let line = composer.area.lines().get(row).map_or("", String::as_str);
+        let before: String = line.chars().take(col).collect();
+        let shown_row = u16::try_from(row)
+            .unwrap_or(u16::MAX)
+            .min(inner.height.saturating_sub(1));
+        let at = Position::new(
+            inner
+                .x
+                .saturating_add(u16::try_from(before.width()).unwrap_or(u16::MAX))
+                .min(inner.right().saturating_sub(1)),
+            inner.y + shown_row,
+        );
+        self.render_suggestions(frame, composer, inner, at);
+        Some(at)
+    }
+
+    /// The suggestions for the word at the cursor `at`, in a menu just above the composer's text in `inner`.
+    fn render_suggestions(
+        &self,
+        frame: &mut Frame<'_>,
+        composer: &Composer<A>,
+        inner: Rect,
+        at: Position,
+    ) {
+        let rows = composer.suggestions.len().min(MENU_ROWS);
+        if rows == 0 || inner.y < 2 {
+            return;
+        }
+        let first = composer.selected.saturating_sub(rows - 1);
+        let width = composer
+            .suggestions
+            .iter()
+            .map(|suggestion| {
+                suggestion
+                    .label
+                    .iter()
+                    .map(|(text, _)| text.width())
+                    .sum::<usize>()
+            })
+            .max()
+            .unwrap_or(0)
+            + 2;
+        let (screen_width, _) = self.size;
+        let width = u16::try_from(width).unwrap_or(u16::MAX).min(screen_width);
+        let rows = u16::try_from(rows)
+            .unwrap_or(u16::MAX)
+            .min(inner.y.saturating_sub(1));
+        let column = inner
+            .x
+            .saturating_add(u16::try_from(composer.word_column()).unwrap_or(0));
+        let x = column
+            .saturating_sub(1)
+            .min(screen_width.saturating_sub(width));
+        let top = inner.y.saturating_sub(1).saturating_sub(rows);
+        let _ = at;
+        for (row, index) in (0..rows).zip(first..) {
+            let Some(suggestion) = composer.suggestions.get(index) else {
+                break;
+            };
+            let selected = index == composer.selected;
+            let base = if selected {
+                Group::PMENU_SEL
+            } else {
+                Group::PMENU
+            };
+            let area = Rect::new(x, top + row, width, 1);
+            frame.render_widget(Clear, area);
+            frame.render_widget(
+                Paragraph::new("")
+                    .style(self.theme.style(Group::PMENU).patch(self.theme.style(base))),
+                area,
+            );
+            let mut spans = vec![ratatui::text::Span::raw(" ")];
+            for (text, group) in &suggestion.label {
+                let style = self
+                    .theme
+                    .style(Group::PMENU)
+                    .patch(self.theme.style(*group))
+                    .patch(self.theme.style(base));
+                spans.push(ratatui::text::Span::styled(text.clone(), style));
+            }
+            frame.render_widget(Paragraph::new(ratatui::text::Line::from(spans)), area);
+        }
+    }
+}

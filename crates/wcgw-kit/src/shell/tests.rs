@@ -487,3 +487,147 @@ fn pictures_out_of_view_go_once_they_take_more_than_the_budget() {
     );
     assert!(!effects.contains(&Effect::Graphics(wcgw_kit_gfx::kitty_delete(sent[1]))));
 }
+
+/// The toy with a composer on its page that sends what is written as a link, and completes `@` names.
+fn composing(width: u16, height: u16) -> Harness<Toy> {
+    let mut toy = toy(width, height);
+    let id = toy.kit.current_buffer();
+    let composer = Composer::new("message")
+        .always_shown()
+        .on_send(|toy: &mut Toy, _, _, text| {
+            toy.typed.push(text);
+            Vec::new()
+        })
+        .completing(
+            |_: &Toy, _, _, word| match word.text.strip_prefix('@') {
+                Some(name) => ["ada", "alan", "grace"]
+                    .into_iter()
+                    .filter(|known| known.starts_with(name))
+                    .map(|known| Suggestion {
+                        label: vec![(format!("@{known}"), Group::NORMAL)],
+                        insert: format!("@{known} "),
+                        key: known.to_owned(),
+                    })
+                    .collect(),
+                None => Vec::new(),
+            },
+            |toy: &mut Toy, _, _, chosen| {
+                toy.typed.push(format!("picked {}", chosen.key));
+                Vec::new()
+            },
+        );
+    toy.kit.set_composer(id, composer);
+    toy.kit.keymap_mut().bind(
+        &[crate::keymap::Mode::Normal],
+        "i",
+        "startinsert",
+        "write",
+        crate::keymap::Topic::new(75, "Writing"),
+    );
+    toy
+}
+
+#[test]
+fn a_composer_docks_under_its_buffer_and_insert_mode_types_into_it() {
+    let mut toy = composing(40, 10);
+
+    let rows = toy.screen().rows;
+    assert_eq!(rows[6], "─".repeat(40), "its border: {rows:#?}");
+    assert_eq!(rows[7], "message", "the placeholder");
+    let _ = toy.press("ihello");
+    let screen = toy.screen();
+    assert_eq!(screen.rows[7], "hello");
+    assert!(screen.rows[8].starts_with(" INSERT "), "{:#?}", screen.rows);
+    assert_eq!(screen.cursor, (5, 7));
+
+    let _ = toy.press("<CR>");
+    assert_eq!(toy.app.typed, ["hello"], "sent");
+    assert_eq!(
+        toy.screen().rows[7],
+        " message",
+        "emptied, the cursor before the placeholder"
+    );
+    let _ = toy.press("<Esc>");
+    assert!(toy.screen().rows[8].starts_with(" NORMAL "));
+}
+
+#[test]
+fn alt_enter_breaks_the_line_and_the_composer_grows() {
+    let mut toy = composing(40, 12);
+
+    let _ = toy.press("ione<A-CR>two");
+
+    let rows = toy.screen().rows;
+    assert_eq!(rows[8..10], ["one", "two"], "{rows:#?}");
+    assert_eq!(
+        toy.kit
+            .composer(toy.kit.current_buffer())
+            .map(Composer::text),
+        Some("one\ntwo".into())
+    );
+}
+
+#[test]
+fn words_complete_from_what_the_application_suggests() {
+    let mut toy = composing(40, 12);
+
+    let _ = toy.press("ihi @a");
+    let rows = toy.screen().rows;
+    assert!(rows.iter().any(|row| row.contains("@ada")), "{rows:#?}");
+    assert!(rows.iter().any(|row| row.contains("@alan")), "{rows:#?}");
+    let _ = toy.press("<C-n><CR>");
+
+    let id = toy.kit.current_buffer();
+    assert_eq!(
+        toy.kit.composer(id).map(Composer::text),
+        Some("hi @alan ".into())
+    );
+    assert_eq!(toy.app.typed, ["picked alan"]);
+    let _ = toy.press("@z");
+    assert!(
+        toy.kit
+            .composer(id)
+            .is_some_and(|composer| composer.suggestions().is_empty())
+    );
+}
+
+#[test]
+fn ctrl_x_ctrl_e_edits_the_text_in_the_editor() {
+    let mut toy = composing(40, 10);
+
+    let effects = toy.press("idraft<C-x><C-e>");
+    assert_eq!(
+        effects,
+        [Effect::Edit {
+            text: "draft".into()
+        }]
+    );
+    let _ = toy.update(Msg::Edited(Ok("edited\n".into())));
+
+    let id = toy.kit.current_buffer();
+    assert_eq!(
+        toy.kit.composer(id).map(Composer::text),
+        Some("edited".into())
+    );
+    assert!(
+        toy.app.edited.is_empty(),
+        "the kit's, not the application's"
+    );
+}
+
+#[test]
+fn pasting_in_insert_mode_inserts_and_startinsert_needs_a_composer() {
+    let mut toy = composing(40, 10);
+
+    let _ = toy.press("i");
+    let _ = toy.update(Msg::Paste("pasted".into()));
+    let id = toy.kit.current_buffer();
+    assert_eq!(
+        toy.kit.composer(id).map(Composer::text),
+        Some("pasted".into())
+    );
+
+    let mut plain = self::toy(40, 10);
+    let _ = plain.press(":startinsert<CR>");
+    assert_eq!(cmdline(&plain), "Nothing to write in here");
+}

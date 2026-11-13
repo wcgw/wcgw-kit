@@ -120,6 +120,7 @@ pub(crate) enum Builtin {
     Jumps,
     Nohlsearch,
     Pick,
+    StartInsert,
     Edit,
     Buffer,
     Buffers,
@@ -267,6 +268,12 @@ const BUILT_IN: &[(&str, usize, Builtin, &str)] = &[
     ("pick", 2, Builtin::Pick, "a picker"),
     ("only", 2, Builtin::Only, "close the other windows"),
     ("wincmd", 4, Builtin::Wincmd, "what <C-w> and a key do"),
+    (
+        "startinsert",
+        4,
+        Builtin::StartInsert,
+        "type into the composer",
+    ),
 ];
 
 /// What a command name stands for.
