@@ -8,3 +8,4 @@
 pub mod doc;
 pub mod hl;
 pub mod key;
+pub mod keymap;
