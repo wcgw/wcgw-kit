@@ -976,7 +976,7 @@ fn builtins(leader: Key) -> HashMap<Mode, Table> {
         let newer = Target::Action(Action::JumpNewer);
         bind(&mut normal, notation, newer, "jump forward", Topic::JUMPING);
     }
-    let commands: [(&str, &str, &str, Topic); 20] = [
+    let commands: [(&str, &str, &str, Topic); 22] = [
         ("<F1>", "help", "help", Topic::SEARCHING),
         ("<leader>?", "help", "help", Topic::SEARCHING),
         ("<CR>", "open", "open under cursor", Topic::OPENING),
@@ -986,6 +986,9 @@ fn builtins(leader: Key) -> HashMap<Mode, Table> {
         ("<C-^>", "buffer #", "alternate buffer", Topic::BUFFERS),
         ("<C-6>", "buffer #", "alternate buffer", Topic::BUFFERS),
         ("<C-l>", "edit!", "refresh", Topic::BUFFERS),
+        // The tabline lists the buffers, as Neovim's lists tabs: `gt` and `gT` go through them.
+        ("gt", "bnext", "next buffer", Topic::BUFFERS),
+        ("gT", "bprevious", "previous buffer", Topic::BUFFERS),
         (
             "<leader><leader>",
             "pick buffers",
@@ -1043,6 +1046,13 @@ mod tests {
                 "{notation}"
             );
         }
+    }
+
+    #[test]
+    fn gt_and_g_t_go_through_buffers_as_tabs() {
+        let mut keymap = Keymap::new();
+        assert_eq!(feed(&mut keymap, Mode::Normal, "gt"), [ex("bnext")]);
+        assert_eq!(feed(&mut keymap, Mode::Normal, "gT"), [ex("bprevious")]);
     }
 
     #[test]
