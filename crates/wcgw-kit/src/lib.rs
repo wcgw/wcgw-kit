@@ -16,8 +16,11 @@ pub mod runtime;
 pub mod shell;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
+pub mod when;
 
 pub use app::{App, BufferId, Edit, Effect, Effects, Msg, Quitting, Shell};
+/// Dates and times, as the kit's `when` takes them.
+pub use jiff;
 pub use shell::Kit;
 /// Pictures in the terminal (D15).
 pub use wcgw_kit_gfx as gfx;
