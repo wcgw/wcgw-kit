@@ -141,6 +141,29 @@ impl Cursor {
         }
     }
 
+    /// A cursor at the start of line `line` of block `key`, as the block's content counts its lines, which may
+    /// arrive later: a hunk of a diff, say.
+    #[must_use]
+    pub fn on_line(key: impl Into<BlockKey>, line: usize) -> Self {
+        Self {
+            anchor: Some(Anchor {
+                block: key.into(),
+                line,
+                col: 0,
+                fallback: 0,
+            }),
+            want: None,
+        }
+    }
+
+    /// The block the cursor is in and its line there, as the block's content counts them; `None` until it's placed.
+    #[must_use]
+    pub fn line_in_block(&self) -> Option<(&BlockKey, usize)> {
+        self.anchor
+            .as_ref()
+            .map(|anchor| (&anchor.block, anchor.line))
+    }
+
     /// Where the cursor is drawn.
     #[must_use]
     pub fn screen<T>(&self, layout: &Layout<'_, T>) -> ScreenPos {

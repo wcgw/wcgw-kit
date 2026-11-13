@@ -512,6 +512,20 @@ fn a_cursor_can_wait_at_a_block_that_has_not_arrived_yet() {
 }
 
 #[test]
+fn a_cursor_goes_to_a_line_of_a_block_and_says_which_it_is_on() {
+    let doc = doc(&[("a", &["one", "two"]), ("b", &["three", "four", "five"])]);
+    let layout = Layout::new(&doc, 80);
+    let mut cursor = Cursor::on_line("b", 2);
+    assert_eq!(cursor.screen(&layout), at(4, 0));
+
+    cursor.apply(&layout, Motion::Up, 3);
+
+    let (block, line) = cursor.line_in_block().expect("placed");
+    assert_eq!((block, line), (&BlockKey::new("a"), 1));
+    assert_eq!(Cursor::new().line_in_block(), None, "not placed yet");
+}
+
+#[test]
 fn an_empty_document_has_no_target_and_ignores_motions() {
     let doc = Document::new();
     let layout = Layout::new(&doc, 80);
