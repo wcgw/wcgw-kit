@@ -409,7 +409,8 @@ Each app ends each milestone runnable, on its `wcgw-kit` branch.
 - [ ] Push `wcgw/wcgw-kit`; the apps pin a git revision; CI green on all four.
   - [x] Pushed, and tagged `v0.1.0` (88762d4) by the author; the four apps build from the tag (devnull 5a6e3e9, ghd
     e200c2c, muttrs 9423f2f, slackers 847c3d7), each tested on it.
-  - [ ] voight's `wcgw-kit` branch pushed: ghd and muttrs still pin it in a local checkout (`file://`).
+  - [x] voight released as `v0.2.0` (f10f608, the `wcgw-kit` branch merged) by the author; ghd (839bf39) and muttrs
+    (63db203) build from the tag, no longer a local checkout.
   - [ ] CI green on all four: not checked.
 
 ## Implementation notes
