@@ -188,7 +188,11 @@ fn toy(width: u16, height: u16) -> Harness<Toy> {
     kit.add_segment(Segment::new(Side::Right, 0, |_: &Toy, _| {
         Some("@me".to_owned())
     }));
-    Harness::new(Toy::default(), kit, width, height)
+    // The tabline only with two buffers, as Vim's default, so these tests' rows are the windows' from the top; the
+    // kit's own default shows it always (see the test of it).
+    let mut toy = Toy::default();
+    let _ = kit.run_ex(&mut toy, "set showtabline=1");
+    Harness::new(toy, kit, width, height)
 }
 
 fn cmdline(toy: &Harness<Toy>) -> String {
@@ -232,6 +236,19 @@ fn the_statusline_rounds_the_mode_and_the_ruler_as_lualine_or_squares_them_witho
     let rows = toy.screen().rows;
     assert!(rows[6].starts_with(" NORMAL  page/home"), "{rows:#?}");
     assert!(rows[6].ends_with("All  1:1"), "{rows:#?}");
+}
+
+#[test]
+fn the_tabline_shows_from_the_start_as_bufferline_s_does() {
+    let kit = Kit::new("page/home", page("page/home"), true);
+    let toy = Harness::new(Toy::default(), kit, 40, 8);
+
+    assert_eq!(
+        toy.screen().rows[0],
+        " page/home",
+        "{:#?}",
+        toy.screen().rows
+    );
 }
 
 #[test]

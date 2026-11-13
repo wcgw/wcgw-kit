@@ -48,7 +48,7 @@ impl Default for Options {
             graphics: Graphics::HalfBlocks,
             hlsearch: true,
             incsearch: true,
-            showtabline: 1,
+            showtabline: 2,
             laststatus: 3,
             mouse: true,
             icons: IconSet::Auto,

@@ -138,7 +138,7 @@ to night) and leave the background to the terminal.
 ### D10. Screen anatomy
 
 - **Tabline**: listed buffers (devnull's bufferline; ghd's inbox views become buffers). Sidebar buffers are unlisted.
-  `showtabline=1`.
+  `showtabline=2`, as bufferline shows it always in the author's Neovim (it was 1, Vim's).
 - **Winbar** per window: titles and breadcrumbs, supplied by the buffer (slackers' breadcrumbs, muttrs'
   `account › mailbox`, ghd's Preview title).
 - **One global statusline** (`laststatus=3`) of segments, each with an alignment and a priority; the lowest go first
