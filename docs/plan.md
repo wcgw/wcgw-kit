@@ -421,7 +421,7 @@ Calls made while building, and why; each can be revisited.
   `:not-junk` to `:notjunk` and `:delete-mailbox` to `:delmailbox` (its ADR 0007).
 - **Picker verbs** act on the choice under the cursor and leave the picker open, for the verb to change its
   choices (`Picker::set_choices`, after deleting a draft, say) or close it (`Kit::close_picker`, to open what was
-  chosen in a split, say); the border's bottom says them. A pick still closes it. (Until 1505ad6+1 a verb closed
+  chosen in a split, say); the border's bottom says them. A pick still closes it. (Before 8634e00 a verb closed
   the picker, against what this note said; slackers found it.)
 - **Any quit frees the pictures**: `Kit::update` puts the escapes deleting what the terminal holds before an
   `Effect::Quit`, the application's own (after `Quitting::Later`) as the kit's.
