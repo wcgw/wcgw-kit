@@ -315,16 +315,20 @@ Each app ends each milestone runnable, on its `wcgw-kit` branch.
 
 ### M1 The kit, out of devnull (no behaviour changes but those listed)
 
-- [ ] **M1.1** Workspace skeleton: crates, lints, license and attribution; devnull's path dependency.
-- [ ] **M1.2** `key`; `keymap` with generic builtins, devnull's maps supplied by devnull, an open `Topic`.
-- [ ] **M1.3** `ex` into `Commands<A>`; the option registry; completion per command.
-- [ ] **M1.4** `hl`: standard groups, app groups with links, `.vim` colorschemes (tokyonight ×4, `default`); devnull's
-  `Devnull*` colours as devnull's overrides. ⏸
-- [ ] **M1.5** `doc` with a generic `Target`; `windows`/`window` laid out over a document; range highlights.
-- [ ] **M1.6** Chrome out of `impl App`: tabline, winbar, statusline segments, cmdline and messages, which-key,
-  picker, hover, confirm, generated `:help`.
-- [ ] **M1.7** `run(app)`: session, timers, `$EDITOR`, OSC 52 and 777; the test harness and fake clock. ⏸ devnull's
-  suite green, with the expected differences listed (moon by default, the new chrome).
+- [x] **M1.1** Workspace skeleton: crates, lints, license and attribution; devnull's path dependency.
+- [x] **M1.2** `key`; `keymap` with generic builtins, devnull's maps supplied by devnull, an open `Topic`.
+- [x] **M1.3** `ex` into `Commands<A>`; completion per command. The option registry for applications waits for an
+  application with an option of its own (none so far: `graphics`, `icons` and such are the kit's).
+- [x] **M1.4** `hl`: standard groups, app groups with links, `.vim` colorschemes (tokyonight ×4, `default`); devnull's
+  `Devnull*` colours as devnull's overrides. The generated schemes match devnull's tables group for group.
+- [x] **M1.5** `doc` with a generic `Target`; `windows`/`window` laid out over a document. Range highlights wait for
+  their first user (M5/M6).
+- [x] **M1.6** Chrome out of `impl App`: tabline, statusline segments, cmdline and messages, which-key, picker,
+  hover, confirm, generated `:help` (keys, then commands). The winbar waits for a buffer that has one (M3).
+- [x] **M1.7** `run`: session, timers, `$EDITOR`, OSC 52; the test harness and fake clock. devnull's 234 tests green
+  through a facade with the old `App`'s shape; a run of the real `dn` in tmux (isolated `HOME`): starts on
+  `connect`, `:help` opens above with the separator line, `:qa` quits. Expected differences: moon by default, one
+  statusline (`'laststatus'` 3), `:help` lists commands. OSC 777 waits for slackers (M3).
 
 ### M2 `wcgw-kit-gfx`
 
@@ -349,6 +353,29 @@ Each app ends each milestone runnable, on its `wcgw-kit` branch.
 ### M8 Publishing
 
 - [ ] Push `wcgw/wcgw-kit`; the apps pin a git revision; CI green on all four.
+
+## Implementation notes
+
+Calls made while building, and why; each can be revisited.
+
+- **The app contract** (open question of M1): `App` has associated `Target`, `Msg` (`Clone + PartialEq + Send`, so
+  tests compare messages) and `Effect` types; `update` plus hooks with defaults (`start`, `open`, `edit`,
+  `edit_names`, `reload`, `shown`, `keyed`, `edited`, `focus`). Commands, pickers and segments are closures over
+  `(&mut A, &mut Kit<A>)`; a plugin's state lives in `A`. `Kit::show_buffer` queues the buffer and the kit calls
+  `App::shown` after the application returns, so the kit never calls into the application re-entrantly.
+- **Effects** are `Effect<M, E>`: the kit's plus `App(E)`; `After { after, msg }` replaces application wake tokens
+  (devnull's polling). The editor's result goes back through `App::edited`; only one editor runs at a time.
+- **`:open`, `<CR>`, `<C-]>` are the kit's**: `:open` hands the target under the cursor to `App::open`, with the tag
+  stack kept by the kit (as any command made with `Command::jumps`).
+- **Tabline**: shows the listed buffers, or the current one when none is listed (devnull's `connect` page). devnull
+  keeps it always shown (`showtabline=2`), as it always was.
+- **The picker keeps devnull's fuzzy scorer** for now; nucleo (D14) comes with slackers (M3), which uses it already.
+- **The harness has `style_at`, not `group_at` yet**: a cell holds a style, not the groups that made it. To add when a
+  test needs it.
+- **No kit-own test suite for the shell yet**: devnull's 234 app tests cover it. A small one with a dummy application
+  is to come with M3, when a second application exercises the seams.
+- **devnull's graphics moved as they were** into `wcgw-kit-gfx`; M2 replaces them.
+- **`<C-w>q`** is bound, as in Vim.
 
 ## Found in the apps while surveying (not caused by this plan)
 
