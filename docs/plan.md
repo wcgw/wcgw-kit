@@ -340,7 +340,10 @@ Each app ends each milestone runnable, on its `wcgw-kit` branch.
 
 ### M3 slackers
 
-- [ ] Composer, mouse, lazy and bottom-anchored buffers, async picker sources, icons. Moved code relicensed. ⏸
+- [x] **M3.1** In the kit, each tested through the toy application: the composer (D4), the mouse (D5), windows of
+  a size and placements (D11), winbars (D10), buffers that follow their end (D3), icons (D9), OSC 777
+  notifications, nucleo in pickers (D14).
+- [ ] **M3.2** slackers on the kit. Moved code relicensed. ⏸
 
 ### M4 `wcgw-kit-text`
 
@@ -373,7 +376,6 @@ Calls made while building, and why; each can be revisited.
   stack kept by the kit (as any command made with `Command::jumps`).
 - **Tabline**: shows the listed buffers, or the current one when none is listed (devnull's `connect` page). devnull
   keeps it always shown (`showtabline=2`), as it always was.
-- **The picker keeps devnull's fuzzy scorer** for now; nucleo (D14) comes with slackers (M3), which uses it already.
 - **The harness has `style_at`, not `group_at` yet**: a cell holds a style, not the groups that made it. To add when a
   test needs it.
 - **No `a=q` query** (D15 asked for one): it tells whether the kitty protocol is there, not whether Unicode
@@ -386,6 +388,13 @@ Calls made while building, and why; each can be revisited.
 - **The kit has its own shell suite** now (a toy application, 16 tests), for what devnull's doesn't reach: hooks,
   the registries, segments, searching pickers, pictures' budget and `graphics=off`.
 - **`<C-w>q`** is bound, as in Vim.
+- **Lazy lines** (D3) are not built: no application has needed them yet; slackers' and muttrs' histories are paged
+  in by the application, as devnull's logs are.
+- **Following the end**: a window follows a buffer's end only when what changed came from elsewhere than a key, and
+  only if its cursor was on the last row after the previous update; a key moving up stops it, `G` resumes it.
+- **The composer's completion** gives the application the word before the cursor; the application decides what it
+  is (an @-mention, an emoji, a slash command), returns suggestions, and hears which was chosen, to keep what it
+  means (slackers' picked references stay slackers').
 
 ## Found in the apps while surveying (not caused by this plan)
 
