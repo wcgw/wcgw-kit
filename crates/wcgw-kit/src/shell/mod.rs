@@ -68,6 +68,8 @@ pub struct Buffer<T> {
     follows_end: bool,
     /// What windows showing it highlight where the cursor is.
     cursorline: CursorLine,
+    /// The widest it's laid out, for prose (`'textwidth'`, through [`Kit::set_prose`]); `None` to fill its windows.
+    textwidth: Option<u16>,
 }
 
 /// What a window highlights where its cursor is, in [`Group::CURSOR_LINE`](crate::hl::Group::CURSOR_LINE):
@@ -162,6 +164,7 @@ impl<T> Buffer<T> {
             winbar: None,
             follows_end: false,
             cursorline: CursorLine::Off,
+            textwidth: None,
         }
     }
 }
@@ -589,6 +592,30 @@ impl<A: App> Kit<A> {
             .first()
             .and_then(|&id| self.window_text_area_of(id))
             .map_or(self.size.0, |area| area.width)
+    }
+
+    /// How wide prose in `buffer` is laid out: its [`Kit::text_width`], or `'textwidth'` (120 by default, as the
+    /// author's Neovim) if that's narrower. For an application that wraps prose itself, as a mail's body.
+    #[must_use]
+    pub fn prose_width(&self, buffer: BufferId) -> u16 {
+        self.text_width(buffer).min(self.textwidth())
+    }
+
+    /// Makes the kit lay `buffer` out as prose, no wider than `'textwidth'`, rather than filling its windows: for
+    /// text the kit wraps, as a feed of posts. A list stays as wide as its windows.
+    pub fn set_prose(&mut self, buffer: BufferId, prose: bool) {
+        let textwidth = self.textwidth();
+        if let Some(buffer) = self.buffers.get_mut(buffer.0) {
+            buffer.textwidth = if prose { Some(textwidth) } else { None };
+        }
+    }
+
+    /// `'textwidth'`, in cells; `u16::MAX` for none.
+    fn textwidth(&self) -> u16 {
+        match u16::try_from(self.options.textwidth) {
+            Ok(0) | Err(_) => u16::MAX,
+            Ok(textwidth) => textwidth,
+        }
     }
 
     /// The cursor of window `id`, if it is open.
@@ -1626,6 +1653,13 @@ impl<A: App> Kit<A> {
                 for arg in &ex::set_args(args) {
                     if let Some(shown) = self.options.set(arg, &mut self.keymap)? {
                         self.info(shown);
+                    }
+                }
+                // Prose follows `'textwidth'`.
+                let textwidth = self.textwidth();
+                for buffer in &mut self.buffers {
+                    if buffer.textwidth.is_some() {
+                        buffer.textwidth = Some(textwidth);
                     }
                 }
                 let mut effects = Vec::new();

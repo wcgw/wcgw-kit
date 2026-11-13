@@ -36,6 +36,9 @@ pub(super) struct Options {
     /// Whether keys typed toward a binding show at the right of the command line: off, as the author's Neovim has
     /// it (`noshowcmd`), since which-key shows them.
     pub(super) showcmd: bool,
+    /// The widest prose is laid out, in cells, however wide its window: 120, as the author's Neovim has it; 0 for the
+    /// window's width. Lists fill their windows whatever it says.
+    pub(super) textwidth: usize,
 }
 
 impl Default for Options {
@@ -53,6 +56,7 @@ impl Default for Options {
             mouse: true,
             icons: IconSet::Auto,
             showcmd: false,
+            textwidth: 120,
         }
     }
 }
@@ -99,6 +103,7 @@ const OPTIONS: &[(&str, &str, Opt)] = &[
     ("incsearch", "is", Opt::Flag(|o| &mut o.incsearch)),
     ("showcmd", "sc", Opt::Flag(|o| &mut o.showcmd)),
     ("scrolloff", "so", Opt::Count(|o| &mut o.scrolloff)),
+    ("textwidth", "tw", Opt::Count(|o| &mut o.textwidth)),
     ("timeoutlen", "tm", Opt::Number(|o| &mut o.timeoutlen)),
     (
         "showtabline",
@@ -124,6 +129,10 @@ pub(super) const HELP: &[(&str, &str)] = &[
     ("incsearch", "show where a search goes while typed"),
     ("showcmd", "show keys typed toward a binding"),
     ("scrolloff", "rows kept in view around the cursor"),
+    (
+        "textwidth",
+        "the widest prose is laid out; 0 for the window's width",
+    ),
     ("timeoutlen", "how long keys wait for more, in ms"),
     (
         "showtabline",

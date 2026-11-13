@@ -117,7 +117,11 @@ impl Window {
         area: Rect,
     ) -> Layout<'d, T> {
         let folds = self.folds.clone();
-        Layout::within(&buffers[buffer.0].doc, folds, area.width, area.height)
+        let shown = &buffers[buffer.0];
+        let width = shown
+            .textwidth
+            .map_or(area.width, |textwidth| area.width.min(textwidth));
+        Layout::within(&shown.doc, folds, width, area.height)
     }
 
     /// The jumplist, oldest first, and the entry `<C-o>` and `<C-i>` last went to: past the end when they have not

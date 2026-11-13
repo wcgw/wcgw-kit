@@ -480,6 +480,38 @@ fn keys_typed_toward_a_binding_show_only_with_showcmd() {
 }
 
 #[test]
+fn prose_is_laid_out_no_wider_than_textwidth_and_lists_fill_their_windows() {
+    let mut toy = toy(40, 8);
+    let mut doc = Document::new();
+    doc.push_back(
+        "prose",
+        vec![Line::text("one two three four five six seven eight")],
+    );
+    *toy.kit.current_doc_mut() = doc;
+    let current = toy.kit.current_buffer();
+    assert_eq!(toy.kit.prose_width(current), 40, "the window's, under 120");
+    assert_eq!(
+        toy.screen().rows[0],
+        "one two three four five six seven eight"
+    );
+
+    let _ = toy.press(":set tw=20<CR>");
+    assert_eq!(toy.kit.prose_width(current), 20);
+    assert_eq!(
+        toy.screen().rows[0],
+        "one two three four five six seven eight",
+        "a list fills its window"
+    );
+    toy.kit.set_prose(current, true);
+    assert_eq!(toy.screen().rows[0], "one two three four", "wrapped at 20");
+    let _ = toy.press(":set tw=0<CR>");
+    assert_eq!(
+        toy.screen().rows[0],
+        "one two three four five six seven eight"
+    );
+}
+
+#[test]
 fn esc_hides_the_search_s_matches() {
     let mut toy = toy(40, 8);
 
