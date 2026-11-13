@@ -24,6 +24,7 @@ pub struct Segment<A: App> {
     pub(crate) side: Side,
     pub(crate) priority: u8,
     pub(crate) render: Render<A>,
+    pub(crate) group: Option<crate::hl::Group>,
 }
 
 impl<A: App> fmt::Debug for Segment<A> {
@@ -47,6 +48,16 @@ impl<A: App> Segment<A> {
             side,
             priority,
             render: Rc::new(render),
+            group: None,
+        }
+    }
+
+    /// Draws it in `group` over the statusline's own colours, as a connection that's down in `DiagnosticError`.
+    #[must_use]
+    pub fn with_group(self, group: crate::hl::Group) -> Self {
+        Self {
+            group: Some(group),
+            ..self
         }
     }
 }

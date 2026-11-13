@@ -257,6 +257,20 @@ impl<A: App> Kit<A> {
                 }
             }
         }
+        let cursor_row = window.cursor.screen(&layout).row;
+        let highlighted = match self.buffers[window.buffer.0].cursorline {
+            super::CursorLine::Off => 0..0,
+            super::CursorLine::Row => cursor_row..cursor_row + 1,
+            super::CursorLine::Item => layout.item_rows(cursor_row),
+        };
+        for (y, row) in (area.y..area.bottom()).zip(top..layout.row_count()) {
+            if highlighted.contains(&row) {
+                frame.buffer_mut().set_style(
+                    Rect::new(area.x, y, area.width, 1),
+                    self.theme.style(Group::CURSOR_LINE),
+                );
+            }
+        }
         for (y, row) in (area.y..area.bottom()).zip(top..layout.row_count()) {
             if layout.is_folded(row) {
                 frame.buffer_mut().set_style(
@@ -348,10 +362,32 @@ impl<A: App> Kit<A> {
             status_area.width,
         );
         let group = statusline_group(is_current);
+        let text: String = status
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
         frame.render_widget(
             Paragraph::new(status).style(self.theme.style(group)),
             status_area,
         );
+        // Segments of a colour of their own, where they ended up.
+        for segment in self
+            .segments
+            .iter()
+            .filter(|segment| segment.group.is_some())
+        {
+            let (Some(shown), Some(own)) = ((segment.render)(app, self), segment.group) else {
+                continue;
+            };
+            if let Some(at) = text.find(&shown) {
+                let x = status_area.x.saturating_add(to_u16(text[..at].width()));
+                let width = to_u16(shown.width()).min(status_area.right().saturating_sub(x));
+                frame
+                    .buffer_mut()
+                    .set_style(Rect::new(x, status_area.y, width, 1), self.theme.style(own));
+            }
+        }
         if is_current {
             // " NORMAL ": the mode and the space on either side of it.
             let label = Rect {

@@ -251,6 +251,18 @@ impl<'d, T> Layout<'d, T> {
         self.rows[row]
     }
 
+    /// The rows of the block that `row` shows part of: an item's, as a message or a mail in a list.
+    #[must_use]
+    pub fn item_rows(&self, row: usize) -> std::ops::Range<usize> {
+        let Some(shown) = self.rows.get(row) else {
+            return row..row;
+        };
+        let lines = self.doc.block_lines(shown.line);
+        let first = self.rows.partition_point(|r| r.line < lines.start);
+        let last = self.rows.partition_point(|r| r.line < lines.end);
+        first..last
+    }
+
     /// The row showing `pos`.
     pub(super) fn row_of(&self, pos: Pos) -> usize {
         let first = self.first_row[pos.line];

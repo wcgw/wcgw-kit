@@ -920,3 +920,117 @@ fn a_sidebar_split_in_rows_keeps_its_width_and_its_windows_their_rows() {
     assert!(below > 0, "{rows:#?}");
     assert_eq!(rows[below + 1].find('│'), Some(20), "{rows:#?}");
 }
+
+/// The toy on a page of three items of two lines each.
+fn items(width: u16, height: u16) -> Harness<Toy> {
+    let mut toy = toy(width, height);
+    let mut doc = Document::new();
+    for n in 1..=3 {
+        doc.push_back(
+            format!("i{n}").as_str(),
+            vec![
+                Line::text(format!("item {n}")),
+                Line::text(format!("more {n}")),
+            ],
+        );
+    }
+    *toy.kit.current_doc_mut() = doc;
+    toy
+}
+
+#[test]
+fn cursorline_highlights_the_cursor_s_row_or_its_whole_item() {
+    let mut toy = items(40, 10);
+    let id = toy.kit.current_buffer();
+    let line = toy.kit.style(Group::CURSOR_LINE).bg;
+    let _ = toy.press("jj");
+
+    toy.kit.buffer_mut(id).set_cursorline(CursorLine::Row);
+    assert_eq!(toy.style_at(0, 2).bg, line, "the row");
+    assert_ne!(toy.style_at(0, 3).bg, line);
+
+    toy.kit.buffer_mut(id).set_cursorline(CursorLine::Item);
+    assert_eq!(toy.style_at(10, 2).bg, line, "the item, across the window");
+    assert_eq!(toy.style_at(0, 3).bg, line);
+    assert_ne!(toy.style_at(0, 1).bg, line, "not the item before");
+}
+
+#[test]
+fn an_application_reads_and_places_the_cursor_of_any_window() {
+    let mut toy = items(60, 10);
+    let main = toy.kit.current_window();
+    let side = toy.kit.add_buffer("side", page("page/side"), false);
+    let sidebar = toy
+        .kit
+        .open_window(Placement::FarLeft, Size::Cells(20), side);
+
+    let _ = toy.press("j0");
+    assert_eq!(
+        toy.kit.targets_in(sidebar)[0],
+        Some(&Thing::Page("page/side/next".into()))
+    );
+    assert!(toy.kit.at_end_of(sidebar));
+    assert!(!toy.kit.at_end_of(main));
+    assert_eq!(toy.kit.text_width(side), 20);
+    assert_eq!(
+        toy.kit.window_text_area(main).map(|area| area.width),
+        Some(39)
+    );
+
+    let layout_end = Cursor::on_block("i3");
+    toy.kit.set_cursor(main, layout_end);
+    toy.kit.focus_window(main);
+    assert_eq!(toy.kit.cursor_row_text(), "item 3");
+    assert_eq!(toy.kit.current_window(), main);
+}
+
+#[test]
+fn defaults_bound_to_keys_run_them_and_folds_answer_the_application() {
+    let mut toy = items(40, 10);
+    toy.kit.keymap_mut().bind_keys(
+        &[crate::keymap::Mode::Normal],
+        "J",
+        "jj",
+        "two down",
+        crate::keymap::Topic::new(75, "Toy"),
+    );
+
+    let _ = toy.press("J");
+    assert_eq!(toy.kit.cursor_row_text(), "item 2");
+
+    let mut doc = Document::new();
+    doc.push_back(
+        "f",
+        crate::doc::Content {
+            lines: vec![Line::text("summary"), Line::text("hidden")],
+            folds: vec![crate::doc::Fold {
+                lines: 1..2,
+                summary: Line::text("folded"),
+                closed: false,
+            }],
+            target: None,
+        },
+    );
+    *toy.kit.current_doc_mut() = doc;
+    let _ = toy.press("gg");
+    toy.kit.fold(None, false);
+    assert_eq!(toy.screen().rows[1], "folded");
+    toy.kit.fold(None, true);
+    assert_eq!(toy.screen().rows[1], "hidden");
+}
+
+#[test]
+fn a_segment_may_have_a_colour_and_a_buffer_a_new_name() {
+    let mut toy = toy(60, 8);
+    toy.kit.add_segment(
+        Segment::new(Side::Left, 2, |_: &Toy, _| Some("down".to_owned()))
+            .with_group(Group::ERROR_MSG),
+    );
+    let id = toy.kit.current_buffer();
+    toy.kit.buffer_mut(id).set_name("page/home (3)");
+
+    let status = statusline(&toy);
+    assert!(status.contains("page/home (3)  down"), "{status}");
+    let x = u16::try_from(status.find("down").expect("shown")).expect("a column");
+    assert_eq!(toy.style_at(x, 6).fg, toy.kit.style(Group::ERROR_MSG).fg);
+}

@@ -85,11 +85,29 @@ const PICTURE_SLOTS: usize = 2;
 /// If the terminal cannot be set up, read from or drawn to.
 pub async fn run<A: App, P: Perform<A>>(
     name: &'static str,
+    app: A,
+    kit: Kit<A>,
+    performer: P,
+    channel: (Inbox<A::Msg>, Mailbox<A::Msg>),
+) -> io::Result<()> {
+    run_returning(name, app, kit, performer, channel)
+        .await
+        .map(|_| ())
+}
+
+/// As [`run`], giving the application and the kit back once it quit, the terminal restored: for what is left to do
+/// after, as waiting for changes still on their way and saving a cache.
+///
+/// # Errors
+///
+/// If the terminal cannot be set up, read from or drawn to.
+pub async fn run_returning<A: App, P: Perform<A>>(
+    name: &'static str,
     mut app: A,
     mut kit: Kit<A>,
     performer: P,
     channel: (Inbox<A::Msg>, Mailbox<A::Msg>),
-) -> io::Result<()> {
+) -> io::Result<(A, Kit<A>)> {
     let env = |name| std::env::var_os(name).map(PathBuf::from);
     let history = crate::history::path(name, env("XDG_STATE_HOME"), env("HOME"));
     if let Some(path) = &history {
@@ -101,7 +119,7 @@ pub async fn run<A: App, P: Perform<A>>(
         let merged = crate::history::merged(&crate::history::read(path), &kit.history());
         let _ = crate::history::write(path, &merged);
     }
-    ran
+    ran.map(|()| (app, kit))
 }
 
 /// The loop of [`run`], until the application quits.
@@ -564,7 +582,22 @@ fn notification(title: &str, body: &str) -> String {
             .filter(|c| !c.is_control() && *c != ';')
             .collect()
     };
-    format!("\x1b]777;notify;{};{}\x1b\\", clean(title), clean(body))
+    // Ghostty drops an OSC longer than 2048 bytes: the title and the body are cut well within it.
+    let cut = |text: String, most: usize| -> String {
+        if text.len() <= most {
+            return text;
+        }
+        let end = (0..=most)
+            .rev()
+            .find(|&at| text.is_char_boundary(at))
+            .unwrap_or(0);
+        format!("{}…", &text[..end])
+    };
+    format!(
+        "\x1b]777;notify;{};{}\x1b\\",
+        cut(clean(title), 256),
+        cut(clean(body), 1024)
+    )
 }
 
 /// Whether the kitty keyboard protocol was turned on, so that it is turned off again exactly once, also from the
@@ -803,6 +836,14 @@ mod tests {
             Some(Mouse::Left),
             "elsewhere"
         );
+    }
+
+    #[test]
+    fn notifications_are_cut_well_within_ghostty_s_limit() {
+        let sent = notification(&"t".repeat(1000), &"é".repeat(2000));
+
+        assert!(sent.len() < 2048, "{}", sent.len());
+        assert!(sent.contains("…"));
     }
 
     #[test]

@@ -724,6 +724,12 @@ impl<T> Document<T> {
         self.starts[block.min(self.blocks.len() - 1)]
     }
 
+    /// The logical lines of the block holding `line`.
+    fn block_lines(&self, line: usize) -> std::ops::Range<usize> {
+        let block = self.block_of(line);
+        self.starts[block]..self.starts[block + 1]
+    }
+
     fn block_of(&self, line: usize) -> usize {
         self.starts.partition_point(|&start| start <= line) - 1
     }

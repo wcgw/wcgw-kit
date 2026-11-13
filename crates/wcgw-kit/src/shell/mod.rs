@@ -66,6 +66,21 @@ pub struct Buffer<T> {
     winbar: Option<Vec<(String, crate::hl::Group)>>,
     /// Whether windows showing it start at its end and stay there as it grows, as a chat does (D3).
     follows_end: bool,
+    /// What windows showing it highlight where the cursor is.
+    cursorline: CursorLine,
+}
+
+/// What a window highlights where its cursor is, in [`Group::CURSOR_LINE`](crate::hl::Group::CURSOR_LINE):
+/// Vim's `'cursorline'`, and the item, for a list whose blocks are items.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CursorLine {
+    /// Nothing.
+    #[default]
+    Off,
+    /// The screen row of the cursor.
+    Row,
+    /// The rows of the block holding the cursor: the message, mail or notification it is on.
+    Item,
 }
 
 impl<T> Buffer<T> {
@@ -97,6 +112,16 @@ impl<T> Buffer<T> {
         self.winbar = title;
     }
 
+    /// Makes windows showing it highlight where their cursor is, as `cursorline` says.
+    pub fn set_cursorline(&mut self, cursorline: CursorLine) {
+        self.cursorline = cursorline;
+    }
+
+    /// Renames it, as its tabline entry shows: a count of what is unread in it, say.
+    pub fn set_name(&mut self, name: impl Into<String>) {
+        self.name = name.into();
+    }
+
     /// Makes windows showing it start at its end and stay there as it grows, while their cursor is on its last row:
     /// as a chat's timeline does.
     pub fn set_follows_end(&mut self, follows: bool) {
@@ -110,6 +135,7 @@ impl<T> Buffer<T> {
             listed,
             winbar: None,
             follows_end: false,
+            cursorline: CursorLine::Off,
         }
     }
 }
@@ -499,8 +525,86 @@ impl<A: App> Kit<A> {
         self.windows.resize(id, size);
     }
 
+    /// Where window `id` draws its text, as laid out now: for an application that lays its lines out for a width.
+    #[must_use]
+    pub fn window_text_area(&self, id: WindowId) -> Option<Rect> {
+        self.window_text_area_of(id)
+    }
+
+    /// The width window `id` draws its text in, or else the first window showing `buffer`, or else the screen's.
+    #[must_use]
+    pub fn text_width(&self, buffer: BufferId) -> u16 {
+        self.windows_showing(buffer)
+            .first()
+            .and_then(|&id| self.window_text_area_of(id))
+            .map_or(self.size.0, |area| area.width)
+    }
+
+    /// The cursor of window `id`, if it is open.
+    #[must_use]
+    pub fn window_cursor(&self, id: WindowId) -> Option<&Cursor> {
+        self.windows.find(id).map(|window| &window.cursor)
+    }
+
+    /// Puts the cursor of window `id` at `cursor`, kept in view: where an application wants a reader to be, as on
+    /// the first unread message of a buffer the window showed before.
+    pub fn set_cursor(&mut self, id: WindowId, cursor: Cursor) {
+        let Some(area) = self.window_text_area_of(id) else {
+            return;
+        };
+        let viewport = Viewport {
+            height: usize::from(area.height),
+            scrolloff: self.options.scrolloff,
+        };
+        let buffers = &self.buffers;
+        let Some(window) = self.windows.find_mut(id) else {
+            return;
+        };
+        window.cursor = cursor;
+        let layout = window.layout(buffers, area);
+        window.follow_cursor(&layout, viewport);
+    }
+
+    /// What the text under the cursor of window `id` refers to, then what the block holding it refers to: as
+    /// [`Kit::targets_under_cursor`] for a window that may not be current.
+    #[must_use]
+    pub fn targets_in(&self, id: WindowId) -> [Option<&A::Target>; 2] {
+        let (Some(window), Some(area)) = (self.windows.find(id), self.window_text_area_of(id))
+        else {
+            return [None, None];
+        };
+        let layout = window.layout(&self.buffers, area);
+        [
+            window.cursor.target(&layout),
+            window.cursor.block_target(&layout),
+        ]
+    }
+
+    /// Whether the cursor of window `id` is on the last row of what it shows.
+    #[must_use]
+    pub fn at_end_of(&self, id: WindowId) -> bool {
+        let (Some(window), Some(area)) = (self.windows.find(id), self.window_text_area_of(id))
+        else {
+            return false;
+        };
+        let layout = window.layout(&self.buffers, area);
+        window.cursor.screen(&layout).row + 1 >= layout.row_count()
+    }
+
+    /// Folds in the current window as `op` says, as `zo` and its kin do; `None` opens (`Some(true)`) or closes every
+    /// fold, as `zR` and `zM`.
+    pub fn fold(&mut self, op: Option<crate::doc::FoldOp>, all_open: bool) {
+        let window = self.windows.current_mut();
+        let doc = &self.buffers[window.buffer.0].doc;
+        match op {
+            Some(op) => window.folds.fold(doc, &window.cursor, op),
+            None => window.folds.fold_all(doc, all_open),
+        }
+        self.follow_cursor();
+    }
+
     /// The text area of window `id`, as laid out now.
-    fn window_text_area(&self, id: WindowId) -> Option<Rect> {
+    fn window_text_area_of(&self, id: WindowId) -> Option<Rect> {
         let area = self.windows_area();
         let rect = self
             .windows
@@ -515,7 +619,7 @@ impl<A: App> Kit<A> {
 
     /// Puts the cursor of window `id` on the last row of its buffer.
     fn cursor_to_end(&mut self, id: WindowId) {
-        let Some(area) = self.window_text_area(id) else {
+        let Some(area) = self.window_text_area_of(id) else {
             return;
         };
         let viewport = Viewport {
@@ -543,7 +647,7 @@ impl<A: App> Kit<A> {
                 if !self.buffers[window.buffer.0].follows_end {
                     return false;
                 }
-                let Some(area) = self.window_text_area(id) else {
+                let Some(area) = self.window_text_area_of(id) else {
                     return false;
                 };
                 let layout = window.layout(&self.buffers, area);

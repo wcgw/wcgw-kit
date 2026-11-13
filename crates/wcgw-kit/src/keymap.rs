@@ -287,7 +287,10 @@ const MAX_MAP_DEPTH: usize = 100;
 struct Default {
     modes: Vec<Mode>,
     notation: Cow<'static, str>,
+    /// The ex command it runs; for one made by [`Keymap::bind_keys`], the keys it stands for.
     command: String,
+    /// Whether `command` is keys rather than an ex command.
+    keys: bool,
     description: Cow<'static, str>,
     topic: Topic,
 }
@@ -465,6 +468,30 @@ impl Keymap {
             modes: modes.to_vec(),
             notation: notation.into(),
             command: command.into(),
+            keys: false,
+            description: description.into(),
+            topic,
+        };
+        self.bind_default(&default);
+        self.defaults.push(default);
+    }
+
+    /// Binds `notation` in `modes` to the keys `rhs` (Vim notation, not remapped), as one of the application's
+    /// defaults: for what an ex command alone can't do, as running one then moving on (`:toggle<CR>j`), or opening
+    /// the command line with a command half typed (`:filter `).
+    pub fn bind_keys(
+        &mut self,
+        modes: &[Mode],
+        notation: impl Into<Cow<'static, str>>,
+        rhs: impl Into<String>,
+        description: impl Into<Cow<'static, str>>,
+        topic: Topic,
+    ) {
+        let default = Default {
+            modes: modes.to_vec(),
+            notation: notation.into(),
+            command: rhs.into(),
+            keys: true,
             description: description.into(),
             topic,
         };
@@ -474,8 +501,16 @@ impl Keymap {
 
     fn bind_default(&mut self, default: &Default) {
         for mode in &default.modes {
+            let target = if default.keys {
+                Target::Keys {
+                    rhs: parse_keys(&default.command, self.leader),
+                    remap: false,
+                }
+            } else {
+                Target::Action(Action::Ex(default.command.clone()))
+            };
             let binding = Binding {
-                target: Target::Action(Action::Ex(default.command.clone())),
+                target,
                 description: default.description.clone(),
                 written: default.notation.clone(),
                 topic: Some(default.topic),
