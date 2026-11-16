@@ -303,7 +303,7 @@ impl<A: App> Kit<A> {
             }
         }
 
-        let composer_rows = self.composer_rows(window.buffer);
+        let composer_rows = self.composer_rows(window.buffer, rect.width);
         let mut typed_at = None;
         if composer_rows > 0 {
             let composer = Rect::new(rect.x, area.bottom(), rect.width, composer_rows);

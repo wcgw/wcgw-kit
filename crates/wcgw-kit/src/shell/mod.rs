@@ -1966,7 +1966,7 @@ impl<A: App> Kit<A> {
     fn text_area(&self, rect: Rect, windows: Rect, buffer: BufferId) -> Rect {
         let bar = self.options.laststatus != 3 || rect.bottom() < windows.bottom();
         let above = u16::from(self.buffers[buffer.0].winbar.is_some()).min(rect.height);
-        let below = u16::from(bar) + self.composer_rows(buffer);
+        let below = u16::from(bar) + self.composer_rows(buffer, rect.width);
         Rect {
             y: rect.y + above,
             height: rect.height.saturating_sub(below + above),

@@ -881,6 +881,56 @@ fn alt_enter_breaks_the_line_and_the_composer_grows() {
 }
 
 #[test]
+fn a_long_line_wraps_at_words_and_the_composer_grows() {
+    let mut toy = composing(20, 12);
+
+    let _ = toy.press("ithe quick brown fox jumps over the lazy dog");
+
+    let screen = toy.screen();
+    assert_eq!(screen.rows[6], "─".repeat(20), "{:#?}", screen.rows);
+    assert_eq!(
+        screen.rows[7..10],
+        ["the quick brown fox", "jumps over the lazy", "dog"]
+    );
+    assert_eq!(screen.cursor, (3, 9), "after the last word");
+    let id = toy.kit.current_buffer();
+    assert_eq!(
+        toy.kit.composer(id).map(Composer::text),
+        Some("the quick brown fox jumps over the lazy dog".into()),
+        "wrapped as shown, not in the text"
+    );
+}
+
+#[test]
+fn up_moves_to_the_row_shown_above_in_a_wrapped_line() {
+    let mut toy = composing(20, 12);
+    let _ = toy.press("ithe quick brown fox jumps over the lazy dog");
+    // Drawn between keys, as the kit's loop draws.
+    let _ = toy.screen();
+
+    let _ = toy.press("<Up>X");
+
+    let id = toy.kit.current_buffer();
+    assert_eq!(
+        toy.kit.composer(id).map(Composer::text),
+        Some("the quick brown fox jumXps over the lazy dog".into())
+    );
+}
+
+#[test]
+fn a_composer_grows_to_eight_rows_then_scrolls() {
+    let mut toy = composing(10, 14);
+
+    let _ = toy.press(&format!("i{}", "x".repeat(95)));
+
+    let screen = toy.screen();
+    assert_eq!(screen.rows[3], "─".repeat(10), "{:#?}", screen.rows);
+    assert_eq!(screen.rows[4], "x".repeat(10));
+    assert_eq!(screen.rows[11], "xxxxx", "the last of ten rows");
+    assert_eq!(screen.cursor, (5, 11));
+}
+
+#[test]
 fn words_complete_from_what_the_application_suggests() {
     let mut toy = composing(40, 12);
 
