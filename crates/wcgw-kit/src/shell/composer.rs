@@ -1,16 +1,19 @@
 //! The composer (D4): the one editable thing, a text area docked under a window showing its buffer, for writing
 //! what an application sends, such as a chat message. Insert mode types into it with readline keys; `<Esc>` leaves;
-//! `<C-x><C-e>` hands the text to `$EDITOR`. The application completes words as they are typed: it says what a word
-//! may become, the kit shows them in a menu and puts the one chosen in place.
+//! `<C-x><C-e>` hands the text to `$EDITOR`. Long lines wrap at words, and the composer grows with its text up to
+//! [`MAX_ROWS`], then scrolls. The application completes words as they are typed: it says what a word may become,
+//! the kit shows them in a menu and puts the one chosen in place.
 
 use std::fmt;
 use std::rc::Rc;
 
 use ratatui::Frame;
+use ratatui::buffer::Buffer;
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use ratatui_textarea::{CursorMove, Input, Key as TextKey, TextArea};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget as _};
+use ratatui_textarea::{CursorMove, Input, Key as TextKey, ScreenCursor, TextArea, WrapMode};
 use unicode_width::UnicodeWidthStr;
 
 use super::{Kit, Mode_};
@@ -18,8 +21,8 @@ use crate::app::{App, BufferId, Effect, Effects};
 use crate::hl::Group;
 use crate::key::{Code, Key, Mods};
 
-/// The most lines a composer shows; longer text scrolls in it.
-const MAX_LINES: u16 = 8;
+/// The most rows a composer's text takes; longer text scrolls in it.
+const MAX_ROWS: u16 = 8;
 
 /// The most suggestions shown at once.
 const MENU_ROWS: usize = 8;
@@ -97,7 +100,7 @@ impl<A: App> Composer<A> {
     pub fn new(placeholder: impl Into<String>) -> Self {
         let placeholder = placeholder.into();
         Self {
-            area: text_area("", &placeholder),
+            area: text_area(""),
             placeholder,
             title: None,
             always: false,
@@ -210,7 +213,7 @@ impl<A: App> Composer<A> {
 
     /// Replaces its text with `text`, the cursor at the end.
     pub fn set_text(&mut self, text: &str) {
-        self.area = text_area(text, &self.placeholder);
+        self.area = text_area(text);
         self.suggestions.clear();
     }
 
@@ -251,34 +254,38 @@ impl<A: App> Composer<A> {
         })
     }
 
-    /// The column, in cells from the composer's left, where the word before the cursor starts.
-    fn word_column(&self) -> usize {
-        let ratatui_textarea::DataCursor(row, col) = self.area.cursor();
-        let Some(line) = self.area.lines().get(row) else {
-            return 0;
-        };
-        let before: String = line.chars().take(col).collect();
-        let start = before.rfind(char::is_whitespace).map_or(0, |at| at + 1);
-        before[..start].width()
-    }
-
     /// Whether it shows under its buffer now: always, or while it holds text, or while `typing`.
     fn is_shown(&self, typing: bool) -> bool {
         self.always || typing || !self.area.is_empty()
     }
 
-    /// The rows it takes when shown: its border and its lines.
-    fn height(&self) -> u16 {
-        let lines = u16::try_from(self.area.lines().len()).unwrap_or(u16::MAX);
-        lines.clamp(1, MAX_LINES) + 1
+    /// The rows it takes when shown `width` cells wide: its border, and its text wrapped at that width, up to
+    /// [`MAX_ROWS`].
+    fn height(&self, width: u16) -> u16 {
+        let rows = u16::try_from(self.rows(width)).unwrap_or(u16::MAX);
+        rows.clamp(1, MAX_ROWS) + 1
+    }
+
+    /// The rows its whole text takes wrapped at `width` cells, as drawing it that wide wraps it.
+    fn rows(&self, width: u16) -> usize {
+        // The text area wraps as it is drawn, and keeps how many rows that makes to itself: a copy is drawn that
+        // wide, and the row its end is on counted.
+        let mut probe = self.area.clone();
+        let at = Rect::new(0, 0, width, 1);
+        probe.render(at, &mut Buffer::empty(at));
+        probe.move_cursor(CursorMove::Bottom);
+        probe.move_cursor(CursorMove::End);
+        probe.screen_cursor().row + 1
     }
 }
 
-/// An empty text area saying `placeholder` while empty, holding `text` with the cursor at its end.
-fn text_area(text: &str, placeholder: &str) -> TextArea<'static> {
+/// A text area holding `text`, the cursor at its end, wrapping at words as it is drawn. The kit draws the
+/// placeholder and the cursor, and styles the text.
+fn text_area(text: &str) -> TextArea<'static> {
     let mut area = TextArea::new(text.lines().map(str::to_owned).collect());
-    area.set_placeholder_text(placeholder);
+    area.set_wrap_mode(WrapMode::WordOrGlyph);
     area.set_cursor_line_style(Style::new());
+    area.set_cursor_style(Style::new());
     area.move_cursor(CursorMove::Bottom);
     area.move_cursor(CursorMove::End);
     area
@@ -345,12 +352,12 @@ impl<A: App> Kit<A> {
         matches!(self.mode, Mode_::Insert(typing) if typing == id)
     }
 
-    /// The rows the composer of the buffer a window shows takes at its bottom, when it shows.
-    pub(super) fn composer_rows(&self, id: BufferId) -> u16 {
+    /// The rows the composer of the buffer a window `width` cells wide shows takes at its bottom, when it shows.
+    pub(super) fn composer_rows(&self, id: BufferId, width: u16) -> u16 {
         self.composers
             .get(&id)
             .filter(|composer| composer.is_shown(self.typing_in(id)))
-            .map_or(0, Composer::height)
+            .map_or(0, |composer| composer.height(width))
     }
 
     /// A key typed into the composer of `id`.
@@ -543,42 +550,45 @@ impl<A: App> Kit<A> {
         let inner = block.inner(area);
         frame.render_widget(Clear, area);
         frame.render_widget(block, area);
-        if !typing && composer.area.is_empty() {
-            frame.render_widget(
-                Paragraph::new(composer.placeholder.as_str())
-                    .style(self.theme.style(Group::COMMENT)),
-                inner,
-            );
-            return None;
+        let cursor = self
+            .theme
+            .style(Group::NORMAL)
+            .add_modifier(Modifier::REVERSED);
+        if composer.area.is_empty() {
+            let mut placeholder = Vec::new();
+            if typing {
+                placeholder.push(Span::styled(" ", cursor));
+            }
+            placeholder.push(Span::styled(
+                composer.placeholder.as_str(),
+                self.theme.style(Group::COMMENT),
+            ));
+            frame.render_widget(Paragraph::new(Line::from(placeholder)), inner);
+            return typing.then(|| inner.as_position());
         }
-        let mut area_widget = composer.area.clone();
-        area_widget.set_style(self.theme.style(Group::NORMAL));
-        area_widget.set_placeholder_style(self.theme.style(Group::COMMENT));
-        let cursor = if typing {
-            self.theme
-                .style(Group::NORMAL)
-                .add_modifier(Modifier::REVERSED)
-        } else {
-            Style::new()
-        };
-        area_widget.set_cursor_style(cursor);
-        frame.render_widget(&area_widget, inner);
+        // Drawn itself rather than a copy: the text area learns the width it wraps at and where it scrolled to as
+        // it is drawn, which moving its cursor up and down by the rows shown goes by.
+        frame.render_widget(&composer.area, inner);
+        frame
+            .buffer_mut()
+            .set_style(inner, self.theme.style(Group::NORMAL));
         if !typing {
             return None;
         }
-        let ratatui_textarea::DataCursor(row, col) = composer.area.cursor();
-        let line = composer.area.lines().get(row).map_or("", String::as_str);
-        let before: String = line.chars().take(col).collect();
-        let shown_row = u16::try_from(row)
-            .unwrap_or(u16::MAX)
-            .min(inner.height.saturating_sub(1));
+        let ScreenCursor { row, col, .. } = composer.area.screen_cursor();
+        let (top, _) = composer.area.scroll_offset();
+        let row = u16::try_from(row).unwrap_or(u16::MAX).saturating_sub(top);
+        // At the end of a row as wide as the composer, the cursor stays on its last cell.
         let at = Position::new(
             inner
                 .x
-                .saturating_add(u16::try_from(before.width()).unwrap_or(u16::MAX))
+                .saturating_add(u16::try_from(col).unwrap_or(u16::MAX))
                 .min(inner.right().saturating_sub(1)),
-            inner.y + shown_row,
+            inner.y.saturating_add(row),
         );
+        frame
+            .buffer_mut()
+            .set_style(Rect::new(at.x, at.y, 1, 1), cursor);
         self.render_suggestions(frame, composer, inner, at);
         Some(at)
     }
@@ -614,14 +624,15 @@ impl<A: App> Kit<A> {
         let rows = u16::try_from(rows)
             .unwrap_or(u16::MAX)
             .min(inner.y.saturating_sub(1));
-        let column = inner
-            .x
-            .saturating_add(u16::try_from(composer.word_column()).unwrap_or(0));
+        // The word is on the cursor's row, as wrapping keeps words whole unless wider than the composer.
+        let word = composer.word().map_or(0, |(word, _)| word.text.width());
+        let column =
+            at.x.saturating_sub(u16::try_from(word).unwrap_or(u16::MAX))
+                .max(inner.x);
         let x = column
             .saturating_sub(1)
             .min(screen_width.saturating_sub(width));
         let top = inner.y.saturating_sub(1).saturating_sub(rows);
-        let _ = at;
         for (row, index) in (0..rows).zip(first..) {
             let Some(suggestion) = composer.suggestions.get(index) else {
                 break;

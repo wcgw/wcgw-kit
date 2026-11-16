@@ -66,6 +66,8 @@ to night) and leave the background to the terminal.
 - The only editable thing: a composer docked under a window.
   - Insert mode with readline keys (`<C-w>`, `<C-u>`, arrows, Home/End), multi-line, `<CR>` sending or breaking the
     line as configured; `<Esc>` leaves. No Vim modal editing inside: `<C-x><C-e>` hands the text to `$EDITOR`.
+  - Long lines wrap at words, and the composer grows with its text up to 8 rows, then scrolls; `<Up>` and `<Down>`
+    move by the rows shown.
   - Completion: apps register triggers (`@`, `:`, `/`) with sources, shown in the `Pmenu` the wildmenu uses.
   - Built on ratatui-textarea, which stays out of the kit's API.
 - The `:` line and every prompt (search, masked passphrase, muttrs' To and Subject) share its line editing; muttrs'

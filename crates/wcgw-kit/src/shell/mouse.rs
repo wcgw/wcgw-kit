@@ -126,7 +126,7 @@ impl<A: App> Kit<A> {
             .and_then(|(id, rect)| {
                 let buffer = self.windows.find(id)?.buffer;
                 let text = self.text_area(rect, area, buffer);
-                let rows = self.composer_rows(buffer);
+                let rows = self.composer_rows(buffer, rect.width);
                 let composer =
                     (rows > 0).then(|| Rect::new(rect.x, text.bottom(), rect.width, rows));
                 Some((id, text, composer))
